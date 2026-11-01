@@ -1,0 +1,153 @@
+﻿@import "tailwindcss";
+
+@theme {
+  --color-forest-50: #f1f5f0;
+  --color-forest-100: #e3ece3;
+  --color-forest-200: #c8d9c8;
+  --color-forest-300: #a5c2a6;
+  --color-forest-400: #7fa180;
+  --color-forest-500: #5d805f;
+  --color-forest-600: #466b4c;
+  --color-forest-700: #35563b;
+  --color-forest-800: #294431;
+  --color-forest-900: #20372a;
+  --color-forest-950: #15271d;
+}
+
+body {
+  background: #f4f6ef;
+}
+
+html.dark {
+  color-scheme: dark;
+}
+
+.dark body {
+  background: #111812;
+  color: #e4e9e1;
+}
+
+.dark .app-shell {
+  background: #111812;
+  color: #e4e9e1;
+}
+
+.dark .bg-white,
+.dark .bg-white\/95 {
+  background-color: #1a241c;
+}
+
+.dark .bg-slate-50 {
+  background-color: #172019;
+}
+
+.dark .bg-slate-100 {
+  background-color: #222e24;
+}
+
+.dark .bg-forest-50 {
+  background-color: #26372a;
+}
+
+.dark .bg-forest-100 {
+  background-color: #304534;
+}
+
+.dark .text-slate-900,
+.dark .text-slate-800,
+.dark .text-slate-700 {
+  color: #e4e9e1;
+}
+
+.dark .text-slate-600,
+.dark .text-slate-500 {
+  color: #aab5a8;
+}
+
+.dark .text-slate-400 {
+  color: #899688;
+}
+
+.dark .text-\[\#182334\] {
+  color: #e4e9e1;
+}
+
+.dark .text-forest-800 {
+  color: #d7e5d3;
+}
+
+.dark .text-forest-700 {
+  color: #b9d0b5;
+}
+
+.dark .border-slate-100,
+.dark .border-slate-200 {
+  border-color: #303c32;
+}
+
+.dark .border-forest-600 {
+  border-color: #759675;
+}
+
+.dark .divide-slate-100 > :not(:last-child) {
+  border-color: #303c32;
+}
+
+.dark input,
+.dark select,
+.dark textarea {
+  border-color: #3a483b;
+  background-color: #151e17;
+  color: #e4e9e1;
+}
+
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: #899688;
+}
+
+.dark [class~="hover:bg-slate-50"]:hover,
+.dark [class~="hover:bg-slate-100"]:hover {
+  background-color: #263329;
+}
+
+.dark [class~="hover:text-slate-900"]:hover {
+  color: #f0f4ed;
+}
+
+.dark .bg-amber-50 {
+  background-color: #382e1d;
+}
+
+.dark .bg-amber-100 {
+  background-color: #493a22;
+}
+
+.dark .text-amber-600,
+.dark .text-amber-700 {
+  color: #e9bd70;
+}
+
+.dark .bg-rose-50 {
+  background-color: #3a2222;
+}
+
+.dark .border-rose-200 {
+  border-color: #684040;
+}
+
+.dark .text-rose-800 {
+  color: #f0b5ae;
+}
+
+.dark .bg-emerald-50 {
+  background-color: #20372a;
+}
+
+.dark .border-emerald-200 {
+  border-color: #395d43;
+}
+
+.dark .text-emerald-800 {
+  color: #b8d9b8;
+}

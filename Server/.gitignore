@@ -1,0 +1,16 @@
+.env
+.env.*
+!.env.example
+/uploads/models/nasa_ims_bearing_isolation_forest.joblib
+.env
+.env.*
+!.env.example
+devices.local.json
+config.json
+integration-output.txt
+tools/sensor_simulator/runs/
+.venv/
+node_modules/
+__pycache__/
+*.py[cod]
+.pytest_cache/

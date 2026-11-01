@@ -1,0 +1,9 @@
+config.json
+devices.local.json
+*.local.json
+runs/
+ground_truth*.jsonl
+*.log
+__pycache__/
+.pytest_cache/
+.venv/

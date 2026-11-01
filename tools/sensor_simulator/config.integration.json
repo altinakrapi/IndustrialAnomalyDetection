@@ -1,0 +1,155 @@
+{
+  "api_base_url": "http://127.0.0.1:8000",
+  "send_interval_seconds": 0.75,
+  "duration_seconds": 300,
+  "speed_up": 1,
+  "seed": 20261028,
+  "random_faults_per_device": 0,
+  "random_fault_duration_seconds": 60,
+  "max_delivery_attempts": 5,
+  "devices": [
+    {
+      "name": "Integration Main",
+      "device_code": "SIM-INTEGRATION-MAIN",
+      "device_type": "motor",
+      "operating_profile": "continuous",
+      "baselines": {
+        "Vibration RMS": 2.4
+      },
+      "noise": {
+        "Vibration RMS": 0.12
+      },
+      "wear_per_simulated_hour": {},
+      "parameters": [
+        "Vibration RMS"
+      ],
+      "sample_count": 492,
+      "parameter_intervals_seconds": {
+        "Vibration RMS": 3
+      }
+    },
+    {
+      "name": "Integration Independent 02",
+      "device_code": "SIM-INTEGRATION-02",
+      "device_type": "pump",
+      "operating_profile": "continuous",
+      "baselines": {
+        "Vibration RMS": 2.1
+      },
+      "noise": {
+        "Vibration RMS": 0.1
+      },
+      "wear_per_simulated_hour": {},
+      "parameters": [
+        "Vibration RMS"
+      ],
+      "sample_count": 160,
+      "parameter_intervals_seconds": {
+        "Vibration RMS": 3
+      }
+    },
+    {
+      "name": "Integration Independent 03",
+      "device_code": "SIM-INTEGRATION-03",
+      "device_type": "fan",
+      "operating_profile": "continuous",
+      "baselines": {
+        "Vibration RMS": 1.6
+      },
+      "noise": {
+        "Vibration RMS": 0.08
+      },
+      "wear_per_simulated_hour": {},
+      "parameters": [
+        "Vibration RMS"
+      ],
+      "sample_count": 160,
+      "parameter_intervals_seconds": {
+        "Vibration RMS": 3
+      }
+    }
+  ],
+  "faults": [
+    {
+      "device_code": "SIM-INTEGRATION-MAIN",
+      "parameter": "Vibration RMS",
+      "type": "point_spike",
+      "start_seconds": 60,
+      "end_seconds": 60,
+      "magnitude": 8,
+      "severity": "high"
+    },
+    {
+      "device_code": "SIM-INTEGRATION-MAIN",
+      "parameter": "Vibration RMS",
+      "type": "gradual_degradation",
+      "start_seconds": 94.5,
+      "end_seconds": 116.25,
+      "magnitude": 0.8,
+      "severity": "high"
+    },
+    {
+      "device_code": "SIM-INTEGRATION-MAIN",
+      "parameter": "Vibration RMS",
+      "type": "sudden_level_shift",
+      "start_seconds": 150.75,
+      "end_seconds": 168.75,
+      "magnitude": 2.5,
+      "severity": "high"
+    },
+    {
+      "device_code": "SIM-INTEGRATION-MAIN",
+      "parameter": "Vibration RMS",
+      "type": "stuck_sensor",
+      "start_seconds": 203.25,
+      "end_seconds": 213.75,
+      "magnitude": 1,
+      "severity": "medium"
+    },
+    {
+      "device_code": "SIM-INTEGRATION-MAIN",
+      "parameter": "Vibration RMS",
+      "type": "signal_dropout",
+      "start_seconds": 248.25,
+      "end_seconds": 262.5,
+      "magnitude": 1,
+      "severity": "medium"
+    },
+    {
+      "device_code": "SIM-INTEGRATION-MAIN",
+      "parameter": "Vibration RMS",
+      "type": "increased_variance",
+      "start_seconds": 297,
+      "end_seconds": 311.25,
+      "magnitude": 5,
+      "severity": "medium"
+    },
+    {
+      "device_code": "SIM-INTEGRATION-MAIN",
+      "parameter": "Vibration RMS",
+      "type": "slow_drift",
+      "start_seconds": 345.75,
+      "end_seconds": 367.5,
+      "magnitude": 0.8,
+      "severity": "high"
+    },
+    {
+      "device_code": "SIM-INTEGRATION-02",
+      "parameter": "Vibration RMS",
+      "type": "point_spike",
+      "start_seconds": 75,
+      "end_seconds": 75,
+      "magnitude": 4,
+      "severity": "medium"
+    },
+    {
+      "device_code": "SIM-INTEGRATION-03",
+      "parameter": "Vibration RMS",
+      "type": "sudden_level_shift",
+      "start_seconds": 75,
+      "end_seconds": 93,
+      "magnitude": 1,
+      "severity": "medium"
+    }
+  ]
+}

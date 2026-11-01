@@ -1,0 +1,168 @@
+{
+  "api_base_url": "http://127.0.0.1:8000",
+  "send_interval_seconds": 5,
+  "duration_seconds": 300,
+  "speed_up": 30,
+  "seed": 20261027,
+  "random_faults_per_device": 0,
+  "random_fault_duration_seconds": 600,
+  "max_delivery_attempts": 5,
+  "devices": [
+    {
+      "name": "Simulated Motor 01",
+      "device_code": "SIM-MOTOR-01",
+      "device_type": "motor",
+      "operating_profile": "working_hours",
+      "baselines": {
+        "Vibration RMS": 2.4,
+        "Temperature": 64,
+        "Current": 24,
+        "Rotational Speed": 1480
+      },
+      "noise": {
+        "Vibration RMS": 0.12,
+        "Temperature": 0.8,
+        "Current": 0.7,
+        "Rotational Speed": 8
+      },
+      "wear_per_simulated_hour": {
+        "Vibration RMS": 0.004,
+        "Temperature": 0.001
+      },
+      "parameters": [
+        "Vibration RMS",
+        "Temperature",
+        "Current",
+        "Rotational Speed"
+      ]
+    },
+    {
+      "name": "Simulated Pump 01",
+      "device_code": "SIM-PUMP-01",
+      "device_type": "pump",
+      "operating_profile": "continuous",
+      "baselines": {
+        "Vibration RMS": 2.1,
+        "Temperature": 52,
+        "Pressure": 4.2,
+        "Current": 18,
+        "Rotational Speed": 1450
+      },
+      "noise": {
+        "Vibration RMS": 0.1,
+        "Temperature": 0.7,
+        "Pressure": 0.08,
+        "Current": 0.5,
+        "Rotational Speed": 7
+      },
+      "wear_per_simulated_hour": {
+        "Vibration RMS": 0.006,
+        "Temperature": 0.001
+      },
+      "parameters": [
+        "Vibration RMS",
+        "Temperature",
+        "Pressure",
+        "Current",
+        "Rotational Speed"
+      ]
+    },
+    {
+      "name": "Simulated Compressor 01",
+      "device_code": "SIM-COMPRESSOR-01",
+      "device_type": "compressor",
+      "operating_profile": "continuous",
+      "baselines": {
+        "Vibration RMS": 2.8,
+        "Temperature": 78,
+        "Pressure": 7.5,
+        "Current": 42,
+        "Rotational Speed": 2950
+      },
+      "noise": {
+        "Vibration RMS": 0.15,
+        "Temperature": 1.0,
+        "Pressure": 0.12,
+        "Current": 1.0,
+        "Rotational Speed": 12
+      },
+      "wear_per_simulated_hour": {
+        "Vibration RMS": 0.005,
+        "Temperature": 0.001
+      },
+      "parameters": [
+        "Vibration RMS",
+        "Temperature",
+        "Pressure",
+        "Current",
+        "Rotational Speed"
+      ]
+    },
+    {
+      "name": "Simulated Fan 01",
+      "device_code": "SIM-FAN-01",
+      "device_type": "fan",
+      "operating_profile": "working_hours",
+      "baselines": {
+        "Vibration RMS": 1.6,
+        "Temperature": 42,
+        "Current": 11,
+        "Rotational Speed": 980
+      },
+      "noise": {
+        "Vibration RMS": 0.08,
+        "Temperature": 0.6,
+        "Current": 0.35,
+        "Rotational Speed": 5
+      },
+      "wear_per_simulated_hour": {
+        "Vibration RMS": 0.003,
+        "Temperature": 0.001
+      },
+      "parameters": [
+        "Vibration RMS",
+        "Temperature",
+        "Current",
+        "Rotational Speed"
+      ]
+    }
+  ],
+  "faults": [
+    {
+      "device_code": "SIM-MOTOR-01",
+      "parameter": "Vibration RMS",
+      "type": "point_spike",
+      "start_seconds": 600,
+      "end_seconds": 600,
+      "magnitude": 8,
+      "severity": "high"
+    },
+    {
+      "device_code": "SIM-PUMP-01",
+      "parameter": "Vibration RMS",
+      "type": "gradual_degradation",
+      "start_seconds": 600,
+      "end_seconds": 3600,
+      "magnitude": 0.8,
+      "severity": "high"
+    },
+    {
+      "device_code": "SIM-COMPRESSOR-01",
+      "parameter": "Pressure",
+      "type": "sudden_level_shift",
+      "start_seconds": 1200,
+      "end_seconds": 2400,
+      "magnitude": 2.5,
+      "severity": "medium"
+    },
+    {
+      "device_code": "SIM-FAN-01",
+      "parameter": "Current",
+      "type": "increased_variance",
+      "start_seconds": 900,
+      "end_seconds": 3000,
+      "magnitude": 5,
+      "severity": "medium"
+    }
+  ]
+}
