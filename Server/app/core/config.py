@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str | None = None
     SMTP_FROM_EMAIL: str | None = None
     PASSWORD_RESET_FRONTEND_URL: str = "http://localhost:5173"
+    SENSOR_INGESTION_LIMIT_PER_MINUTE: int = Field(default=120, ge=1, le=10000)
+    SENSOR_INGESTION_GLOBAL_REQUEST_LIMIT_PER_MINUTE: int = Field(
+        default=1200, ge=120, le=100000
+    )
 
     @field_validator("DATABASE_URL")
     @classmethod

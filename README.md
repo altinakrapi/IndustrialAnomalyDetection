@@ -5,6 +5,7 @@ Industrial Anomaly Detection is a role-based web application for monitoring equi
 ## What it does
 
 - Ingests manual, sensor-key, simulator, and imported dataset measurements.
+- Applies atomic per-device sensor limits based on reading count rather than batch count.
 - Runs Isolation Forest and Z-score analysis against stored history.
 - Presents anomaly and severity evidence for human review.
 - Supports administrator, data-analyst, and maintenance-technician workflows.
@@ -36,6 +37,11 @@ python .\simulator.py --config .\config.json run
 ```
 
 Sign in, open **Overview**, then open **Anomalies**. Simulator readings remain labelled `simulated`.
+
+## Database migrations
+
+- The recovered `9e2a7c4f1b6d_add_email_delivery` migration restores the email preferences and outbox schema.
+- Migration and database stamp repairs are performed with the application's explicit backup and review procedure; never run an upgrade, downgrade, or stamp against an undisclosed database.
 
 ## Documentation
 

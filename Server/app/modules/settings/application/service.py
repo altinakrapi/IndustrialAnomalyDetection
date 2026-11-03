@@ -22,6 +22,8 @@ def settings_payload(db: Session) -> dict:
         "manual_extreme_z_score_threshold": 10.0,
         "stale_data_interval_multiplier": 3,
         "notification_device_hourly_limit": 20,
+        "sensor_ingestion_limit_per_minute": environment_settings.SENSOR_INGESTION_LIMIT_PER_MINUTE,
+        "sensor_ingestion_global_request_limit_per_minute": environment_settings.SENSOR_INGESTION_GLOBAL_REQUEST_LIMIT_PER_MINUTE,
     }
     for item in db.scalars(select(SystemSetting)):
         values[item.key] = item.value

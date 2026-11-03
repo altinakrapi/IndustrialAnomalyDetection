@@ -1647,6 +1647,32 @@
             ],
             "title": "Notification Device Hourly Limit"
           },
+          "sensor_ingestion_global_request_limit_per_minute": {
+            "anyOf": [
+              {
+                "maximum": 100000.0,
+                "minimum": 120.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sensor Ingestion Global Request Limit Per Minute"
+          },
+          "sensor_ingestion_limit_per_minute": {
+            "anyOf": [
+              {
+                "maximum": 10000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sensor Ingestion Limit Per Minute"
+          },
           "stale_data_interval_multiplier": {
             "anyOf": [
               {

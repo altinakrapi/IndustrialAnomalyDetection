@@ -839,13 +839,12 @@ def deliver_batch(
     device_code: str,
     readings: list[dict[str, Any]],
     max_attempts: int,
-    rate_limiter: PerDeviceRateLimiter,
+    rate_limiter: PerDeviceRateLimiter | None = None,
     sleeper: Callable[[float], None] = time.sleep,
     on_retry: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any] | None:
     if not readings:
         return None
-    rate_limiter.reserve(device_code, len(readings))
     payload = {"device_identifier": device_code, "readings": readings}
     for attempt in range(max_attempts):
         try:
@@ -1077,7 +1076,6 @@ def run_simulation(
                             device_code=device_code,
                             readings=readings,
                             max_attempts=config["max_delivery_attempts"],
-                            rate_limiter=sender_limit,
                             sleeper=sleeper,
                             on_retry=ledger.write,
                         )

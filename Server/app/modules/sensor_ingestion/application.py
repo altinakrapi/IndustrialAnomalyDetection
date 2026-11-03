@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_db, require_roles
+from app.core.system_settings import get_system_setting
 from app.modules.devices.application.plausibility import physical_measurement_issue
 from app.modules.devices.api.equipment import _measurement_payload
 from app.modules.devices.application.measurement_recording import (
@@ -355,7 +356,11 @@ def _authorized_device(
 
 
 def _check_rate_limit(
-    db: Session, api_key: DeviceAPIKey, now: datetime, incoming_count: int
+    db: Session,
+    api_key: DeviceAPIKey,
+    now: datetime,
+    incoming_count: int,
+    device_identifier: str | None = None,
 ) -> None:
     locked_key = db.scalar(
         select(DeviceAPIKey)
@@ -368,19 +373,76 @@ def _check_rate_limit(
     )
     if locked_key is None:
         raise HTTPException(status_code=401, detail="Invalid or revoked device API key")
-    if (
-        locked_key.rate_window_started_at is None
-        or now - locked_key.rate_window_started_at >= timedelta(minutes=1)
-    ):
-        locked_key.rate_window_started_at = now
-        locked_key.rate_count = 0
-    if locked_key.rate_count + incoming_count > MAX_READINGS_PER_MINUTE:
+    limit_value = get_system_setting(db, "sensor_ingestion_limit_per_minute", MAX_READINGS_PER_MINUTE)
+    try:
+        limit = int(limit_value)
+    except (TypeError, ValueError):
+        limit = MAX_READINGS_PER_MINUTE
+    cutoff = now - timedelta(minutes=1)
+    events = getattr(locked_key, "rate_events", None) or []
+    if not isinstance(events, list):
+        events = []
+    active_events: list[list[object]] = []
+    for event in events:
+        if isinstance(event, list) and len(event) == 2:
+            try:
+                timestamp = datetime.fromisoformat(str(event[0]).replace("Z", "+00:00"))
+                amount = int(event[1])
+            except (TypeError, ValueError):
+                continue
+            if timestamp.tzinfo is None:
+                timestamp = timestamp.replace(tzinfo=timezone.utc)
+            if timestamp > cutoff:
+                active_events.append([timestamp.isoformat(), amount])
+    if not active_events:
+        legacy_count = getattr(locked_key, "rate_count", 0)
+        legacy_started = getattr(locked_key, "rate_window_started_at", None)
+        if isinstance(legacy_count, int) and legacy_count > 0 and isinstance(legacy_started, datetime):
+            if legacy_started.tzinfo is None:
+                legacy_started = legacy_started.replace(tzinfo=timezone.utc)
+            if legacy_started > cutoff:
+                active_events.append([legacy_started.isoformat(), legacy_count])
+    used = sum(int(event[1]) for event in active_events)
+    if used + incoming_count > limit:
+        retry_seconds = 1
+        if active_events:
+            excess = used + incoming_count - limit
+            expired = 0
+            needed_time = now + timedelta(minutes=1)
+            for timestamp_text, amount in active_events:
+                timestamp = datetime.fromisoformat(str(timestamp_text).replace("Z", "+00:00"))
+                expired += int(amount)
+                if expired >= excess:
+                    needed_time = timestamp + timedelta(minutes=1)
+                    break
+            retry_seconds = max(
+                1,
+                int(max(0.0, (needed_time - now).total_seconds())),
+            )
+        remaining = max(0, limit - used)
         raise HTTPException(
             status_code=429,
-            detail="Sensor ingestion limit exceeded; maximum is 120 readings per device per minute",
-            headers={"Retry-After": "60"},
+            detail={
+                "detail": "Sensor ingestion limit exceeded",
+                "device": device_identifier or getattr(
+                    locked_key,
+                    "device_id",
+                    getattr(api_key, "device_id", None),
+                ),
+                "limit": limit,
+                "remaining": remaining,
+            },
+            headers={
+                "Retry-After": str(retry_seconds),
+                "RateLimit-Limit": str(limit),
+                "RateLimit-Remaining": str(remaining),
+                "RateLimit-Reset": str(retry_seconds),
+            },
         )
-    locked_key.rate_count += incoming_count
+    active_events.append([now.isoformat(), incoming_count])
+    locked_key.rate_events = active_events
+    locked_key.rate_count = used + incoming_count
+    locked_key.rate_window_started_at = now
     db.commit()
     db.refresh(api_key)
 
@@ -477,7 +539,7 @@ def ingest_reading(
     device = _authorized_device(payload.device_identifier, api_key, db)
     parameter = _prepare_reading(payload, device, db)
     _validate_sensor_timestamp(payload.sensor_timestamp, received_at)
-    _check_rate_limit(db, api_key, received_at, 1)
+    _check_rate_limit(db, api_key, received_at, 1, payload.device_identifier)
     api_key.last_used_at = received_at
     result = _ingest_one(payload, device, parameter, api_key, db, received_at)
     return result
@@ -522,7 +584,13 @@ def ingest_reading_batch(
             )
         if reading.idempotency_key:
             seen_idempotency_keys.add(reading.idempotency_key)
-    _check_rate_limit(db, api_key, received_at, len(prepared))
+    _check_rate_limit(
+        db,
+        api_key,
+        received_at,
+        len(prepared),
+        payload.device_identifier,
+    )
     api_key.last_used_at = received_at
     results = [
         _ingest_one(reading, device, parameter, api_key, db, received_at)

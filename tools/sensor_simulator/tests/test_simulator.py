@@ -288,6 +288,41 @@ class SetupTests(unittest.TestCase):
 
 
 class DeliveryTests(unittest.TestCase):
+    def test_three_devices_at_point_seven_five_second_interval_have_no_429(self) -> None:
+        class FakeClient:
+            def __init__(self) -> None:
+                self.calls = 0
+                self.rejected = 0
+
+            def post(self, _path: str, payload: dict) -> dict:
+                self.calls += 1
+                if payload["readings"][0]["value"] < 0:
+                    self.rejected += 1
+                    raise simulator.APIError(429, "unexpected rejection", {})
+                return {"count": len(payload["readings"])}
+
+        clients = {code: FakeClient() for code in ("SIM-1", "SIM-2", "SIM-3")}
+        simulated_seconds = 0.0
+        deliveries = 0
+        while simulated_seconds < 120.0:
+            for code, client in clients.items():
+                simulator.deliver_batch(
+                    client,
+                    device_code=code,
+                    readings=[{
+                        "parameter": "Vibration RMS",
+                        "value": 1.0,
+                        "unit": "mm/s",
+                        "idempotency_key": f"{code}-{deliveries}",
+                    }],
+                    max_attempts=1,
+                )
+            deliveries += 1
+            simulated_seconds += 0.75
+
+        self.assertEqual(deliveries * 3, sum(client.calls for client in clients.values()))
+        self.assertTrue(all(client.rejected == 0 for client in clients.values()))
+
     def test_429_uses_retry_after_and_retries_same_idempotent_batch(self) -> None:
         class FakeClient:
             def __init__(self) -> None:

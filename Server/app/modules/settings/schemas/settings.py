@@ -13,6 +13,8 @@ class SettingsUpdate(BaseModel):
     manual_extreme_z_score_threshold: float | None = Field(default=None, gt=0, le=1000)
     stale_data_interval_multiplier: int | None = Field(default=None, ge=1, le=100)
     notification_device_hourly_limit: int | None = Field(default=None, ge=1, le=10000)
+    sensor_ingestion_limit_per_minute: int | None = Field(default=None, ge=1, le=10000)
+    sensor_ingestion_global_request_limit_per_minute: int | None = Field(default=None, ge=120, le=100000)
 
     @model_validator(mode="after")
     def validate_persistence_window(self) -> "SettingsUpdate":

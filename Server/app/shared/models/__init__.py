@@ -13,6 +13,7 @@ from app.shared.models.device import Device
 from app.shared.models.device_api_key import DeviceAPIKey
 from app.shared.models.equipment_measurement import EquipmentMeasurement
 from app.shared.models.equipment_parameter import EquipmentParameter
+from app.shared.models.email_outbox import EmailOutbox
 from app.shared.models.generated_report import GeneratedReport
 from app.shared.models.maintenance_action import MaintenanceAction
 from app.shared.models.maintenance_order import MaintenanceOrder
@@ -51,6 +52,7 @@ __all__ = [
     "DeviceAPIKey",
     "EquipmentMeasurement",
     "EquipmentParameter",
+    "EmailOutbox",
     "GeneratedReport",
     "MaintenanceAction",
     "MaintenanceOrder",

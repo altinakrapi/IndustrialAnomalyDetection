@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, func, text
+from sqlalchemy import DateTime, ForeignKey, Index, JSON, String, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.shared.database.base import Base
@@ -36,6 +36,9 @@ class DeviceAPIKey(Base):
         DateTime(timezone=True), nullable=True
     )
     rate_count: Mapped[int] = mapped_column(default=0, server_default="0", nullable=False)
+    rate_events: Mapped[list[list[object]]] = mapped_column(
+        JSON, default=list, server_default="[]", nullable=False
+    )
     revoked_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

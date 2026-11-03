@@ -1,4 +1,5 @@
 import unittest
+import threading
 from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -522,6 +523,82 @@ class SensorIdempotencyAndRateLimitTests(unittest.TestCase):
 
         self.assertEqual(key.rate_count, 11)
         db.commit.assert_called_once()
+
+    def test_sliding_window_prunes_old_events_on_every_request(self) -> None:
+        now = datetime.now(timezone.utc)
+        key = SimpleNamespace(
+            id=4,
+            device_id=2,
+            rate_events=[
+                [(now - timedelta(seconds=120)).isoformat(), 80],
+                [(now - timedelta(seconds=30)).isoformat(), 10],
+            ],
+            rate_window_started_at=now,
+            rate_count=90,
+            revoked_at=None,
+        )
+        db = Mock()
+        db.scalar.return_value = key
+
+        _check_rate_limit(db, key, now, 1)
+
+        self.assertEqual(key.rate_events, [[(now - timedelta(seconds=30)).isoformat(), 10], [now.isoformat(), 1]])
+
+    def test_rejected_batch_consumes_nothing_and_does_not_change_retry_clock(self) -> None:
+        now = datetime.now(timezone.utc)
+        oldest = now - timedelta(seconds=20)
+        key = SimpleNamespace(
+            id=4,
+            device_id=2,
+            rate_events=[[oldest.isoformat(), 120]],
+            rate_window_started_at=oldest,
+            rate_count=120,
+            revoked_at=None,
+        )
+        db = Mock()
+        db.scalar.return_value = key
+
+        with self.assertRaises(HTTPException) as error:
+            _check_rate_limit(db, key, now, 1)
+
+        self.assertEqual(key.rate_count, 120)
+        self.assertEqual(error.exception.headers["Retry-After"], "40")
+        db.commit.assert_not_called()
+
+    def test_concurrent_rate_limits_use_the_same_locked_row(self) -> None:
+        now = datetime.now(timezone.utc)
+        state_lock = threading.Lock()
+        key = SimpleNamespace(
+            id=4,
+            device_id=2,
+            rate_events=[],
+            rate_window_started_at=now,
+            rate_count=0,
+            revoked_at=None,
+        )
+        accepted = 0
+
+        class ConcurrentDb(Mock):
+            def scalar(self, *_args, **_kwargs):
+                return key
+
+        def send():
+            nonlocal accepted
+            db = ConcurrentDb()
+            try:
+                with state_lock:
+                    _check_rate_limit(db, key, now, 1)
+                    accepted += 1
+            except HTTPException as error:
+                self.assertEqual(error.status_code, 429)
+
+        threads = [threading.Thread(target=send) for _ in range(130)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        self.assertLessEqual(accepted, 120)
 
 
 class AnalysisFailurePersistenceTests(unittest.TestCase):

@@ -16,6 +16,37 @@ Check whether model metadata and migrations agree:
 
 Every schema change must use an Alembic revision that preserves existing data.
 
+### Opt-in migration scratch test
+
+Build an empty database, upgrade it to head, and compare ORM metadata with the
+resulting schema:
+
+```powershell
+$env:IAD_RUN_SCRATCH_MIGRATION_TEST="1"
+.\.venv\Scripts\python.exe -m unittest tests.test_scratch_migration
+Remove-Item Env:IAD_RUN_SCRATCH_MIGRATION_TEST
+```
+
+The test uses the configured PostgreSQL server and creates
+`iad_scratch_migration_check`. It drops that scratch database during cleanup and
+never operates on the application database.
+
+### Unknown Alembic stamp
+
+An unknown revision in `alembic_version`, such as the missing
+`9e2a7c4f1b6d` migration incident, means the stamped revision has no matching
+source file. Recognise it by comparing:
+
+```powershell
+.\.venv\Scripts\python.exe -m alembic current
+.\.venv\Scripts\python.exe -m alembic heads
+.\.venv\Scripts\python.exe -m alembic history
+```
+
+Do not run `upgrade`, `downgrade`, or `stamp` until the missing source is
+recovered and the stamped schema is backed up and inspected. A source revision
+must match the database objects already present before it can be restored.
+
 ## Backup and restore
 
 Create a PostgreSQL backup:
@@ -43,6 +74,18 @@ The script asks for an administrator email and then for a new password and confi
 ## Notification archive and restore
 
 Administrators can preview and execute notification archive or restore operations from **Notifications**. These operations are audit-recorded and should not run concurrently with database maintenance.
+
+## Sensor ingestion limits
+
+The per-device sensor limit defaults to 120 readings per rolling 60-second
+window and is configurable with the `sensor_ingestion_limit_per_minute`
+setting. The global source-IP request guard defaults to 1200 requests per
+minute and is configurable with `SENSOR_INGESTION_GLOBAL_REQUEST_LIMIT_PER_MINUTE`.
+Missing or invalid device keys are rejected before database ingestion and are
+limited per source IP. Sensor batches are accepted or rejected atomically.
+
+429 responses include `Retry-After`, `RateLimit-Limit`,
+`RateLimit-Remaining`, and `RateLimit-Reset`.
 
 ## Tests
 
