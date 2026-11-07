@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
-import { AlertTriangle, Check, FileChartColumn, Search, Wrench } from 'lucide-react'
+import { AlertTriangle, Check, ChevronDown, FileChartColumn, Search, Wrench } from 'lucide-react'
 import { CartesianGrid, ResponsiveContainer, Line, LineChart, Tooltip, XAxis, YAxis } from 'recharts'
 import { download, request } from '../api'
 
@@ -10,7 +10,9 @@ import { AlertEvaluation } from '../components/AlertEvaluation'
 import { SourceTypeBadge, SourceTypeSelect } from '../components/SourceTypeControls'
 import type { SourceTypeFilter } from '../sourceType'
 
-import type { Device, Anomaly, AnomalySummary, Maintenance, Page, User } from '../types'
+import type { Device, Anomaly, AnomalySummary, GroupedAnomalyDevice, Maintenance, Page, User } from '../types'
+import { groupAnomaliesByParameter, groupedAnomalyRequestError, reconcileGroupedDeviceCounts } from './anomalyGrouping'
+import './AnomaliesPage.css'
 
 type JsonRecord = Record<string, unknown>
 
@@ -33,7 +35,19 @@ export function AnomaliesPage({
 }) {
   const [summary, setSummary] = useState<AnomalySummary | null>(null)
   const [items, setItems] = useState<Anomaly[]>([])
+  const [groupedDevices, setGroupedDevices] = useState<GroupedAnomalyDevice[]>([])
+  const [groupedTotal, setGroupedTotal] = useState(0)
+  const [groupedMeasurementTotal, setGroupedMeasurementTotal] = useState(0)
+  const [groupedError, setGroupedError] = useState('')
+  const [groupedWarning, setGroupedWarning] = useState('')
+  const [groupedViewKey, setGroupedViewKey] = useState(0)
+  const [groupByDevice, setGroupByDevice] = useState(true)
+  const [devicePages, setDevicePages] = useState<Record<number, Anomaly[]>>({})
+  const [deviceOffsets, setDeviceOffsets] = useState<Record<number, number>>({})
+  const [deviceTotals, setDeviceTotals] = useState<Record<number, number>>({})
+  const [loadingDevice, setLoadingDevice] = useState<number | null>(null)
   const [total, setTotal] = useState(0)
+  const [anomalyRowTotal, setAnomalyRowTotal] = useState(0)
   const [offset, setOffset] = useState(0)
   const [query, setQuery] = useState('')
   const [debouncedQuery, setDebouncedQuery] = useState('')
@@ -86,11 +100,13 @@ export function AnomaliesPage({
 
   async function exportFiltered() {
     const params = new URLSearchParams({
-      source_type: sourceFilter === 'all' || sourceFilter === 'dataset' ? sourceFilter : 'equipment',
+      source_type: sourceFilter === 'dataset' ? 'dataset' : 'equipment',
       include_test_data: 'true',
       include_dataset: String(sourceFilter === 'dataset'),
     })
-    if (sourceFilter !== 'all') params.set('measurement_source_type', sourceFilter)
+    if (sourceFilter !== 'all' && sourceFilter !== 'dataset') {
+      params.set('measurement_source_type', sourceFilter)
+    }
     if (debouncedQuery.trim()) params.set('search', debouncedQuery.trim())
     if (statusFilter) params.set('status_filter', statusFilter)
     if (severityFilter) params.set('severity', severityFilter)
@@ -105,46 +121,152 @@ export function AnomaliesPage({
   const refreshSummary = useCallback(async () => {
     try {
       const params = new URLSearchParams({
-        source_type: sourceFilter === 'all' || sourceFilter === 'dataset' ? sourceFilter : 'equipment',
+        source_type: sourceFilter === 'dataset' ? 'dataset' : 'equipment',
         include_test_data: 'true',
         include_dataset: String(sourceFilter === 'dataset'),
       })
-      if (sourceFilter !== 'all') params.set('measurement_source_type', sourceFilter)
+      if (sourceFilter !== 'all' && sourceFilter !== 'dataset') {
+        params.set('measurement_source_type', sourceFilter)
+      }
       setSummary(await request<AnomalySummary>(`/anomalies/summary?${params}`))
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Unable to load anomaly summary')
     }
   }, [sourceFilter])
 
+  const makeFilterParams = useCallback((includeDevice: boolean) => {
+    const params = new URLSearchParams({
+      source_type: sourceFilter === 'dataset' ? 'dataset' : 'equipment',
+      include_test_data: 'true',
+      include_dataset: String(sourceFilter === 'dataset'),
+    })
+    if (sourceFilter !== 'all' && sourceFilter !== 'dataset') {
+      params.set('measurement_source_type', sourceFilter)
+    }
+    if (debouncedQuery.trim()) params.set('search', debouncedQuery.trim())
+    if (statusFilter) params.set('status_filter', statusFilter)
+    if (severityFilter) params.set('severity', severityFilter)
+    if (algorithmFilter) params.set('algorithm', algorithmFilter)
+    if (includeDevice && deviceFilter) params.set('device_id', deviceFilter)
+    if (parameterFilter.trim()) params.set('parameter', parameterFilter.trim())
+    if (startDate) params.set('start_date', new Date(`${startDate}T00:00:00`).toISOString())
+    if (endDate) params.set('end_date', new Date(`${endDate}T23:59:59.999`).toISOString())
+    return params
+  }, [algorithmFilter, debouncedQuery, deviceFilter, endDate, parameterFilter, severityFilter, sourceFilter, startDate, statusFilter])
+
+  const refreshGroupedDevices = useCallback(async () => {
+    setLoading(true)
+    setGroupedError('')
+    setGroupedWarning('')
+    try {
+      const params = makeFilterParams(true)
+      const requestGrouped = () => request<{
+        total: number
+        measurement_total: number
+        devices: GroupedAnomalyDevice[]
+      }>(`/anomalies/devices/grouped?${params}`)
+      const requestFlatTotal = async () => {
+        if (sourceFilter === 'dataset') return undefined
+        const flatParams = new URLSearchParams(params)
+        flatParams.set('limit', '1')
+        flatParams.set('offset', '0')
+        const flat = await request<{
+          total: number
+          anomaly_row_total?: number
+        }>(`/anomalies/page?${flatParams}`)
+        return flat.anomaly_row_total ?? flat.total
+      }
+
+      let response = await requestGrouped()
+      let flatTotal: number | undefined
+      let flatCountWarning = ''
+      try {
+        flatTotal = await requestFlatTotal()
+      } catch (caught) {
+        flatTotal = undefined
+        flatCountWarning = caught instanceof Error
+          ? `Could not compare the grouped result with the flat-list total: ${caught.message}`
+          : 'Could not compare the grouped result with the flat-list total.'
+      }
+      let counts = reconcileGroupedDeviceCounts(
+        response.devices,
+        response.total,
+        flatTotal,
+      )
+      if (counts.warning) {
+        response = await requestGrouped()
+        try {
+          flatTotal = await requestFlatTotal()
+          flatCountWarning = ''
+        } catch (caught) {
+          flatTotal = undefined
+          flatCountWarning = caught instanceof Error
+            ? `Could not compare the grouped result with the flat-list total: ${caught.message}`
+            : 'Could not compare the grouped result with the flat-list total.'
+        }
+        counts = reconcileGroupedDeviceCounts(
+          response.devices,
+          response.total,
+          flatTotal,
+        )
+      }
+
+      setGroupedDevices(counts.devices)
+      setGroupedTotal(response.total)
+      setGroupedMeasurementTotal(response.measurement_total)
+      setGroupedWarning(counts.warning || flatCountWarning)
+      setDevicePages({})
+      setDeviceOffsets({})
+      setDeviceTotals({})
+      setGroupedViewKey((current) => current + 1)
+      setError('')
+    } catch (caught) {
+      setGroupedDevices([])
+      setGroupedTotal(0)
+      setGroupedMeasurementTotal(0)
+      setGroupedWarning('')
+      setGroupedError(groupedAnomalyRequestError(caught))
+    } finally {
+      setLoading(false)
+    }
+  }, [makeFilterParams, sourceFilter])
+
+  const loadDevicePage = useCallback(async (deviceId: number, offset: number) => {
+    setLoadingDevice(deviceId)
+    try {
+      const params = makeFilterParams(false)
+      params.set('limit', String(pageSize))
+      params.set('offset', String(offset))
+      const response = await request<{ total: number; items: Anomaly[] }>(
+        `/anomalies/devices/${deviceId}/page?${params}`,
+      )
+      setDevicePages((current) => ({ ...current, [deviceId]: response.items }))
+      setDeviceOffsets((current) => ({ ...current, [deviceId]: offset }))
+      setDeviceTotals((current) => ({ ...current, [deviceId]: response.total }))
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to load device anomalies')
+    } finally {
+      setLoadingDevice(null)
+    }
+  }, [makeFilterParams])
+
   const refreshList = useCallback(async () => {
     setLoading(true)
     try {
-      const params = new URLSearchParams({
-        limit: String(pageSize),
-        offset: String(offset),
-        source_type: sourceFilter === 'all' || sourceFilter === 'dataset' ? sourceFilter : 'equipment',
-        include_test_data: 'true',
-        include_dataset: String(sourceFilter === 'dataset'),
-      })
-      if (sourceFilter !== 'all') params.set('measurement_source_type', sourceFilter)
-      if (debouncedQuery.trim()) params.set('search', debouncedQuery.trim())
-      if (statusFilter) params.set('status_filter', statusFilter)
-      if (severityFilter) params.set('severity', severityFilter)
-      if (algorithmFilter) params.set('algorithm', algorithmFilter)
-      if (deviceFilter) params.set('device_id', deviceFilter)
-      if (parameterFilter.trim()) params.set('parameter', parameterFilter.trim())
-      if (startDate) params.set('start_date', new Date(`${startDate}T00:00:00`).toISOString())
-      if (endDate) params.set('end_date', new Date(`${endDate}T23:59:59.999`).toISOString())
-      const response = await request<{ total: number; items: Anomaly[] }>(`/anomalies/page?${params}`)
+      const params = makeFilterParams(true)
+      params.set('limit', String(pageSize))
+      params.set('offset', String(offset))
+      const response = await request<{ total: number; anomaly_row_total?: number; items: Anomaly[] }>(`/anomalies/page?${params}`)
       setItems(response.items)
       setTotal(response.total)
+      setAnomalyRowTotal(response.anomaly_row_total ?? response.total)
       setError('')
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Unable to load anomalies')
     } finally {
       setLoading(false)
     }
-  }, [algorithmFilter, debouncedQuery, deviceFilter, endDate, offset, parameterFilter, severityFilter, sourceFilter, startDate, statusFilter])
+  }, [makeFilterParams, offset])
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -155,9 +277,16 @@ export function AnomaliesPage({
   }, [query])
 
   useEffect(() => {
+    if (groupByDevice) return
     const frame = window.requestAnimationFrame(() => void refreshList())
     return () => window.cancelAnimationFrame(frame)
-  }, [refreshList])
+  }, [groupByDevice, refreshList])
+
+  useEffect(() => {
+    if (!groupByDevice) return
+    const frame = window.requestAnimationFrame(() => void refreshGroupedDevices())
+    return () => window.cancelAnimationFrame(frame)
+  }, [groupByDevice, refreshGroupedDevices])
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => void refreshSummary())
@@ -191,7 +320,10 @@ export function AnomaliesPage({
         body: JSON.stringify({ status: reviewStatus, comments: reviewNotes || null }),
       })
       setSelected(updated)
-      await Promise.all([refreshList(), refreshSummary()])
+      await Promise.all([
+        groupByDevice ? refreshGroupedDevices() : refreshList(),
+        refreshSummary(),
+      ])
     }, 'Review decision and notes recorded')
   }
 
@@ -248,9 +380,10 @@ export function AnomaliesPage({
   }
 
   const cardClass = 'rounded-xl border border-slate-200 bg-white p-4 shadow-sm'
+  const groupedFilterKey = makeFilterParams(true).toString()
   const reviewableStatuses = ['new', 'under_review', 'confirmed', 'rejected', 'reviewed', 'closed']
 
-  return <>
+  return <div className="anomalies-page space-y-4">
     <PageHeading
       eyebrow="CASE REVIEW"
       title="Equipment anomaly review"
@@ -336,13 +469,112 @@ export function AnomaliesPage({
         <span className="text-[10px] text-slate-500">Simulated readings are included in source filtering and are labeled as synthetic test data.</span>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3 text-xs text-slate-500">
-        <span>{loading ? 'Loading detections…' : `${total.toLocaleString()} unique measurements`}</span>
+        <span>{loading ? 'Loading detections…' : groupByDevice
+          ? groupedError || `${groupedTotal.toLocaleString()} anomaly rows · ${groupedMeasurementTotal.toLocaleString()} unique measurement windows`
+          : `${anomalyRowTotal.toLocaleString()} detections · ${total.toLocaleString()} unique measurement windows`}</span>
         <span>{summary ? `${summary.algorithm_specific_detections.toLocaleString()} detections · ${summary.unique_affected_measurements.toLocaleString()} unique measurement windows` : ''}</span>
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <span className="text-xs font-semibold text-slate-700">Anomaly presentation</span>
+        <div className="inline-flex rounded-full border border-slate-200 bg-slate-50 p-1">
+          <button className={`rounded-full px-3 py-1.5 text-xs font-semibold ${groupByDevice ? 'bg-white text-forest-700 shadow-sm' : 'text-slate-500'}`} type="button" aria-pressed={groupByDevice} onClick={() => setGroupByDevice(true)}>Group by device</button>
+          <button className={`rounded-full px-3 py-1.5 text-xs font-semibold ${!groupByDevice ? 'bg-white text-forest-700 shadow-sm' : 'text-slate-500'}`} type="button" aria-pressed={!groupByDevice} onClick={() => setGroupByDevice(false)}>Flat list</button>
+        </div>
       </div>
       <div className="rounded-lg border border-sky-100 bg-sky-50 px-4 py-3 text-xs text-sky-900">
         Equipment results are shown once per measurement. Physical limits take priority. Statistical High requires at least 3 eligible detectors with the persistence rule; Medium requires exactly 2; Low (watch) requires 1. Statistical results are never Critical. The 5-reading control-chart lag follows the displayed 5-reading ground-truth tolerance.
       </div>
-      <div className="overflow-x-auto rounded-lg border border-slate-100">
+      {groupByDevice ? <div className="space-y-3">
+        {groupedError && <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800">{groupedError}</p>}
+        {!groupedError && groupedWarning && <p role="status" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">{groupedWarning}</p>}
+        {(sourceFilter === 'all' || sourceFilter === 'simulated') && <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-900">
+          Simulated readings are included. They are labeled TEST DATA and must not be interpreted as physical readings or confirmed equipment faults.
+        </div>}
+        <p className="text-xs text-slate-500">NASA IMS dataset anomalies remain in dataset analysis and are not included in this registered-equipment grouping.</p>
+        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+          <div className="grid grid-cols-[minmax(12rem,2fr)_minmax(8rem,1fr)_minmax(8rem,1fr)_minmax(11rem,1.3fr)_minmax(7rem,0.8fr)] gap-3 border-b border-slate-100 bg-slate-50 px-4 py-3 text-[10px] font-bold uppercase tracking-wide text-slate-500 max-md:hidden">
+            <span>Device</span><span>Anomalies</span><span>Highest severity</span><span>Latest anomaly</span><span>Not reviewed</span>
+          </div>
+          {groupedDevices.map((device) => {
+            const deviceItems = devicePages[device.device_id] ?? []
+            const currentOffset = deviceOffsets[device.device_id] ?? 0
+            const deviceTotal = deviceTotals[device.device_id] ?? device.measurement_count
+            const parameterGroups = groupAnomaliesByParameter(deviceItems)
+            const highestSeverity = device.highest_severity.toLowerCase()
+            const severityBadgeTone = highestSeverity === 'critical' || highestSeverity === 'high'
+              ? 'bg-rose-100 text-rose-800'
+              : highestSeverity === 'medium'
+                ? 'bg-amber-100 text-amber-800'
+                : 'bg-emerald-100 text-emerald-800'
+            return <details className="group border-b border-slate-100 last:border-b-0" key={`${device.device_id}-${groupedFilterKey}-${groupedViewKey}`} onToggle={(event) => {
+              if (event.currentTarget.open && devicePages[device.device_id] === undefined) {
+                void loadDevicePage(device.device_id, 0)
+              }
+            }}>
+              <summary className={`grid cursor-pointer list-none grid-cols-[minmax(12rem,2fr)_minmax(8rem,1fr)_minmax(8rem,1fr)_minmax(11rem,1.3fr)_minmax(7rem,0.8fr)] items-center gap-3 px-4 py-4 transition hover:bg-slate-50 max-md:grid-cols-2 max-md:gap-y-3 ${device.not_reviewed_count > 0 ? 'has-unreviewed' : ''}`}>
+                <span className="flex min-w-0 items-start gap-2">
+                  <ChevronDown size={16} className="mt-0.5 shrink-0 text-forest-300 transition-transform group-open:rotate-180" aria-hidden="true" />
+                  <span className="min-w-0">
+                    <strong className="block truncate text-sm font-semibold text-slate-800">{device.device_name}</strong>
+                    <span className="mt-1 block text-[10px] text-slate-500">{device.device_code}</span>
+                    <span className="mt-1 flex flex-wrap gap-1">{device.source_types.map((source) => <SourceTypeBadge key={source} sourceType={source} />)}</span>
+                  </span>
+                </span>
+                <span className="text-xs text-slate-700"><span className="mr-1 text-[9px] font-bold uppercase tracking-wide text-slate-400 md:hidden">Anomalies</span><strong className="tabular-nums">{device.anomaly_count.toLocaleString()}</strong><span className="mt-1 block text-[10px] text-slate-500">{device.measurement_count.toLocaleString()} unique measurement windows</span></span>
+                <span className={`anomaly-severity inline-flex rounded-full px-2 py-1 text-[10px] font-semibold capitalize ${severityBadgeTone}`}><span className="mr-1 text-[9px] font-bold uppercase tracking-wide text-slate-400 md:hidden">Severity</span>{device.highest_severity}</span>
+                <time className="text-xs text-slate-600"><span className="mr-1 text-[9px] font-bold uppercase tracking-wide text-slate-400 md:hidden">Latest</span>{new Date(device.latest_at).toLocaleString()}</time>
+                <span className="text-xs text-slate-700"><span className="mr-1 text-[9px] font-bold uppercase tracking-wide text-slate-400 md:hidden">Not reviewed</span>{device.not_reviewed_count > 0 ? <span className="inline-flex items-center gap-2 rounded-full border border-forest-500/60 bg-forest-700/40 px-2.5 py-1 font-semibold text-forest-100"><span className="unreviewed-dot size-2 animate-pulse rounded-full bg-forest-300" aria-hidden="true" />{device.not_reviewed_count.toLocaleString()} unreviewed</span> : <span className="text-[10px] text-forest-300">All reviewed</span>}</span>
+              </summary>
+              <div className="space-y-4 border-t border-slate-100 bg-slate-50/60 p-4">
+                {loadingDevice === device.device_id && <p className="text-xs text-slate-500">Loading device anomalies…</p>}
+                {parameterGroups.map((group) => {
+                  const unreviewedCount = group.anomalies.filter((anomaly) => anomaly.status === 'new' || anomaly.status === 'under_review').length
+                  return <section className="overflow-hidden rounded-lg border border-slate-200 bg-white" key={`${device.device_id}-${group.parameterId ?? 'unassigned'}`}>
+                  <h3 className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 bg-slate-50 px-4 py-2.5 text-xs font-semibold text-slate-700">
+                    <span>{group.parameterName}</span>
+                    {unreviewedCount > 0 && <span className="inline-flex items-center gap-2 rounded-full border border-forest-500/60 bg-forest-700/40 px-2.5 py-1 text-[10px] text-forest-100"><span className="unreviewed-dot size-2 animate-pulse rounded-full bg-forest-300" aria-hidden="true" />{unreviewedCount.toLocaleString()} unreviewed on this page</span>}
+                  </h3>
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[760px] text-left text-xs">
+                      <thead className="bg-white text-[10px] font-bold uppercase tracking-wide text-slate-500"><tr>{['Measurement time', 'Value · unit', 'Severity', 'Detectors', 'Review status', ''].map((column) => <th className="whitespace-nowrap px-4 py-3" key={column}>{column}</th>)}</tr></thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {group.anomalies.map((anomaly) => {
+                          const entry = Object.entries(anomaly.measurement_values).find(([, value]) => typeof value === 'number')
+                          const unreviewed = anomaly.status === 'new' || anomaly.status === 'under_review'
+                          const severity = (anomaly.measurement_severity ?? anomaly.computed_severity ?? anomaly.severity).toLowerCase()
+                          const anomalySeverityTone = severity === 'critical' || severity === 'high'
+                            ? 'bg-rose-100 text-rose-800'
+                            : severity === 'medium'
+                              ? 'bg-amber-100 text-amber-800'
+                              : 'bg-emerald-100 text-emerald-800'
+                          return <tr className={`hover:bg-slate-50 ${unreviewed ? 'unreviewed-row' : ''}`} key={anomaly.id}>
+                            <td className="whitespace-nowrap px-4 py-3 text-slate-600">{unreviewed && <span className="unreviewed-dot mr-2 inline-block size-2 animate-pulse rounded-full bg-forest-300 align-middle" aria-label="Unreviewed" title="Unreviewed" />}{anomaly.measurement_time ? new Date(anomaly.measurement_time).toLocaleString() : 'Time unavailable'}</td>
+                            <td className="px-4 py-3 font-mono text-slate-700">{entry ? `${entry[1]} ${anomaly.measurement_unit ?? ''}` : `— ${anomaly.measurement_unit ?? ''}`}</td>
+                            <td className="px-4 py-3"><span className={`anomaly-severity inline-flex rounded-full px-2 py-1 text-[10px] font-semibold capitalize ${anomalySeverityTone}`}>{anomaly.measurement_severity ?? anomaly.computed_severity ?? anomaly.severity}</span></td>
+                            <td className="px-4 py-3 text-slate-600">{anomaly.measurement_detectors?.join(', ') || anomaly.algorithm.replaceAll('_', ' ')}</td>
+                            <td className="px-4 py-3"><StatusBadge value={anomaly.status} /></td>
+                            <td className="px-4 py-3"><button className="whitespace-nowrap font-semibold text-forest-700 hover:text-forest-900" type="button" onClick={() => void openAnomaly(anomaly)}>Open details</button></td>
+                          </tr>
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+                })}
+                {!deviceItems.length && loadingDevice !== device.device_id && <EmptyState icon={<Check size={20} />} title="No anomalies on this page" body="The selected filters may exclude all measurements for this device." />}
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+                  <span>{deviceTotal ? `Showing ${currentOffset + 1}–${Math.min(deviceTotal, currentOffset + deviceItems.length)} of ${deviceTotal.toLocaleString()}` : 'No results'}</span>
+                  <div className="flex gap-2">
+                    <button className="rounded-lg border border-slate-200 bg-white px-3 py-2 font-semibold disabled:opacity-40" type="button" disabled={currentOffset === 0 || loadingDevice === device.device_id} onClick={() => void loadDevicePage(device.device_id, Math.max(0, currentOffset - pageSize))}>Previous</button>
+                    <button className="rounded-lg border border-slate-200 bg-white px-3 py-2 font-semibold disabled:opacity-40" type="button" disabled={currentOffset + deviceItems.length >= deviceTotal || loadingDevice === device.device_id} onClick={() => void loadDevicePage(device.device_id, currentOffset + pageSize)}>Next</button>
+                  </div>
+                </div>
+              </div>
+            </details>
+          })}
+          {!loading && !groupedError && groupedDevices.length === 0 && <EmptyState icon={<Check size={20} />} title={sourceFilter === 'dataset' ? 'Dataset anomalies are shown separately' : 'No matching device anomalies'} body={sourceFilter === 'dataset' ? 'Open dataset analysis to review NASA IMS detections.' : 'Try adjusting the filters or source selection.'} />}
+        </div>
+      </div> : <div className="overflow-x-auto rounded-lg border border-slate-100">
         {(sourceFilter === 'all' || sourceFilter === 'simulated') && <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-900">
           Simulated readings are included. They are labeled TEST DATA and must not be interpreted as physical readings or confirmed equipment faults.
         </div>}
@@ -358,7 +590,7 @@ export function AnomaliesPage({
               <td className="px-3 py-3 font-medium capitalize text-slate-700">{anomaly.model_name ?? anomaly.algorithm.replaceAll('_', ' ')}<span className="mt-1 block text-[10px] font-normal text-slate-500">{anomaly.algorithm === 'z_score' ? 'Z-score' : anomaly.algorithm.replaceAll('_', ' ')}</span></td>
               <td className="max-w-64 px-3 py-3"><div className="flex flex-wrap gap-1">{Object.entries(anomaly.measurement_values).slice(0, 3).map(([name, value]) => <code className="rounded bg-slate-100 px-1.5 py-1 text-[9px] text-slate-600" key={name}>{name}: {typeof value === 'number' ? value.toPrecision(4) : String(value ?? '—')}</code>)}</div></td>
               <td className="max-w-72 px-3 py-3 text-[10px] leading-4 text-slate-600"><span className="line-clamp-3">{anomaly.description ?? 'No detection explanation was stored.'}</span></td>
-              <td className="px-3 py-3"><span className={`rounded-full px-2 py-1 text-[10px] font-semibold capitalize ${anomaly.measurement_severity === 'critical' || anomaly.measurement_severity === 'high' ? 'bg-rose-100 text-rose-800' : anomaly.measurement_severity === 'medium' ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`}>{anomaly.measurement_severity ?? anomaly.computed_severity ?? anomaly.severity}</span><span className="mt-1 block text-[10px] text-slate-500">Original: {anomaly.severity}</span><span className="mt-1 block text-[10px] text-slate-500">{anomaly.measurement_detectors?.join(', ') || 'Detector evidence'} · {anomaly.measurement_agreeing_detectors ?? 0} agree</span>{anomaly.measurement_analysis_run_ids?.length > 0 && <span className="mt-1 block text-[10px] text-slate-400">Runs: {anomaly.measurement_analysis_run_ids.join(', ')}</span>}</td>
+              <td className="px-3 py-3"><span className={`anomaly-severity rounded-full px-2 py-1 text-[10px] font-semibold capitalize ${anomaly.measurement_severity === 'critical' || anomaly.measurement_severity === 'high' ? 'bg-rose-100 text-rose-800' : anomaly.measurement_severity === 'medium' ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`}>{anomaly.measurement_severity ?? anomaly.computed_severity ?? anomaly.severity}</span><span className="mt-1 block text-[10px] text-slate-500">Original: {anomaly.severity}</span><span className="mt-1 block text-[10px] text-slate-500">{anomaly.measurement_detectors?.join(', ') || 'Detector evidence'} · {anomaly.measurement_agreeing_detectors ?? 0} agree</span>{anomaly.measurement_analysis_run_ids?.length > 0 && <span className="mt-1 block text-[10px] text-slate-400">Runs: {anomaly.measurement_analysis_run_ids.join(', ')}</span>}</td>
               <td className="px-3 py-3">{anomaly.alert_priority ? <span className="rounded-full bg-indigo-50 px-2 py-1 text-[10px] font-semibold capitalize text-indigo-800">{anomaly.alert_priority}</span> : 'Not set'}</td>
               <td className="px-3 py-3"><StatusBadge value={anomaly.status} /></td>
               <td className="px-3 py-3 text-[10px] text-slate-600">{anomaly.maintenance_orders?.length
@@ -369,14 +601,14 @@ export function AnomaliesPage({
           </tbody>
         </table>
         {!loading && items.length === 0 && <EmptyState icon={<Check size={20} />} title={summary?.total === 0 ? 'No equipment anomalies detected' : 'No matching anomalies'} body={summary?.total === 0 ? 'Anomalies will appear here when analysis flags an actual measurement recorded for registered equipment. NASA IMS experiment detections are shown separately in dataset analysis.' : 'Try adjusting the search or filters.'} />}
-      </div>
-      <div className="flex items-center justify-between text-xs text-slate-500">
+      </div>}
+      {!groupByDevice && <div className="flex items-center justify-between text-xs text-slate-500">
         <span>{total ? `Showing ${offset + 1}–${Math.min(total, offset + items.length)} of ${total.toLocaleString()}` : 'No results'}</span>
         <div className="flex gap-2">
           <button className="rounded-lg border border-slate-200 px-3 py-2 font-semibold disabled:opacity-40" type="button" disabled={offset === 0 || loading} onClick={() => setOffset(Math.max(0, offset - pageSize))}>Previous</button>
           <button className="rounded-lg border border-slate-200 px-3 py-2 font-semibold disabled:opacity-40" type="button" disabled={offset + items.length >= total || loading} onClick={() => setOffset(offset + pageSize)}>Next</button>
         </div>
-      </div>
+      </div>}
     </section>
 
     {selected && <div className="fixed inset-0 z-40 overflow-y-auto bg-slate-950/40 p-3 sm:p-6" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setSelected(null) }}>
@@ -519,5 +751,5 @@ export function AnomaliesPage({
         {canCreateOrder && (selected.device_id === null || selected.device_id === undefined) && <p className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">This detection belongs to a historical dataset without a registered physical device. You can record a review, but a physical maintenance order cannot be created from experiment data.</p>}
       </section>
     </div>}
-  </>
+  </div>
 }

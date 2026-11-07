@@ -3975,6 +3975,518 @@
         ]
       }
     },
+    "/api/v1/anomalies/devices/grouped": {
+      "get": {
+        "operationId": "grouped_device_anomalies_api_v1_anomalies_devices_grouped_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "source_type",
+            "required": false,
+            "schema": {
+              "default": "equipment",
+              "title": "Source Type",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_test_data",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Include Test Data",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_dataset",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Dataset",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "measurement_source_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Measurement Source Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status_filter",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status Filter"
+            }
+          },
+          {
+            "in": "query",
+            "name": "device_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Device Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "dataset_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dataset Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "analysis_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Analysis Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "severity",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Severity"
+            }
+          },
+          {
+            "in": "query",
+            "name": "algorithm",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Algorithm"
+            }
+          },
+          {
+            "in": "query",
+            "name": "parameter",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Parameter"
+            }
+          },
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Search"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start_date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start Date"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end_date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "End Date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Grouped Device Anomalies Api V1 Anomalies Devices Grouped Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Grouped Device Anomalies",
+        "tags": [
+          "anomalies"
+        ]
+      }
+    },
+    "/api/v1/anomalies/devices/{device_id}/page": {
+      "get": {
+        "operationId": "page_device_anomalies_api_v1_anomalies_devices__device_id__page_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "device_id",
+            "required": true,
+            "schema": {
+              "title": "Device Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source_type",
+            "required": false,
+            "schema": {
+              "default": "equipment",
+              "title": "Source Type",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_test_data",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Include Test Data",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_dataset",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Dataset",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "measurement_source_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Measurement Source Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status_filter",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status Filter"
+            }
+          },
+          {
+            "in": "query",
+            "name": "dataset_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dataset Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "analysis_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Analysis Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "severity",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Severity"
+            }
+          },
+          {
+            "in": "query",
+            "name": "algorithm",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Algorithm"
+            }
+          },
+          {
+            "in": "query",
+            "name": "parameter",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Parameter"
+            }
+          },
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Search"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start_date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start Date"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end_date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "End Date"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Page Device Anomalies Api V1 Anomalies Devices  Device Id  Page Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Page Device Anomalies",
+        "tags": [
+          "anomalies"
+        ]
+      }
+    },
     "/api/v1/anomalies/export.csv": {
       "get": {
         "operationId": "export_anomalies_api_v1_anomalies_export_csv_get",

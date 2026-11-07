@@ -1,0 +1,115 @@
+.anomalies-page {
+  border: 1px solid var(--color-forest-800);
+  border-radius: var(--radius-panel);
+  background-color: var(--color-forest-950);
+  color: var(--color-forest-100);
+  padding: 1rem;
+}
+
+.anomalies-page [class*="bg-white"] {
+  background-color: var(--color-forest-900) !important;
+}
+
+.anomalies-page [class*="bg-slate-"],
+.anomalies-page [class*="bg-sky-"],
+.anomalies-page [class*="bg-indigo-"],
+.anomalies-page [class*="bg-amber-"]:not(.anomaly-severity),
+.anomalies-page [class*="bg-rose-"]:not(.anomaly-severity),
+.anomalies-page [class*="bg-emerald-"]:not(.anomaly-severity),
+.anomalies-page [class*="bg-forest-50"],
+.anomalies-page [class*="bg-forest-100"] {
+  background-color: var(--color-forest-800) !important;
+}
+
+.anomalies-page [class*="text-slate-"],
+.anomalies-page [class*="text-sky-"],
+.anomalies-page [class*="text-indigo-"],
+.anomalies-page [class*="text-amber-"]:not(.anomaly-severity),
+.anomalies-page [class*="text-rose-"]:not(.anomaly-severity),
+.anomalies-page [class*="text-emerald-"]:not(.anomaly-severity),
+.anomalies-page [class*="text-forest-"] {
+  color: var(--color-forest-200) !important;
+}
+
+.anomalies-page [class*="border-slate-"],
+.anomalies-page [class*="border-sky-"],
+.anomalies-page [class*="border-indigo-"],
+.anomalies-page [class*="border-amber-"],
+.anomalies-page [class*="border-rose-"],
+.anomalies-page [class*="border-emerald-"],
+.anomalies-page [class*="border-forest-50"],
+.anomalies-page [class*="border-forest-100"],
+.anomalies-page [class*="border-forest-200"] {
+  border-color: var(--color-forest-700) !important;
+}
+
+.anomalies-page [class*="hover:bg-slate-"]:hover,
+.anomalies-page [class*="hover:bg-amber-"]:hover {
+  background-color: var(--color-forest-700) !important;
+}
+
+.anomalies-page [class*="hover:text-slate-"]:hover,
+.anomalies-page [class*="hover:text-forest-"]:hover {
+  color: var(--color-forest-100) !important;
+}
+
+.anomalies-page thead th {
+  background-color: var(--color-forest-900) !important;
+  color: var(--color-forest-200) !important;
+}
+
+.anomalies-page input,
+.anomalies-page select,
+.anomalies-page textarea {
+  border-color: var(--color-forest-700);
+  background-color: var(--color-forest-950);
+  color: var(--color-forest-100);
+}
+
+.anomalies-page input::placeholder,
+.anomalies-page textarea::placeholder {
+  color: var(--color-forest-400);
+}
+
+.anomalies-page [class*="before:bg-"]::before {
+  background-color: var(--color-forest-400) !important;
+}
+
+.anomalies-page .unreviewed-dot {
+  box-shadow: 0 0 0.65rem var(--color-forest-400);
+}
+
+.anomalies-page summary.has-unreviewed {
+  background-color: color-mix(in srgb, var(--color-forest-700) 24%, transparent);
+}
+
+.anomalies-page summary.has-unreviewed:hover {
+  background-color: color-mix(in srgb, var(--color-forest-600) 34%, transparent);
+}
+
+.anomalies-page .unreviewed-row {
+  background-color: color-mix(in srgb, var(--color-forest-700) 16%, transparent);
+}
+
+.anomalies-page .unreviewed-row:hover {
+  background-color: color-mix(in srgb, var(--color-forest-600) 24%, transparent);
+}
+
+.anomalies-page circle[r="6"] {
+  fill: var(--color-forest-400) !important;
+}
+
+.anomalies-page .recharts-cartesian-grid line {
+  stroke: var(--color-forest-700);
+}
+
+.anomalies-page .recharts-cartesian-axis-tick text {
+  fill: var(--color-forest-200);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .anomalies-page .unreviewed-dot,
+  .anomalies-page [class*="before:animate-pulse"]::before {
+    animation: none !important;
+  }
+}

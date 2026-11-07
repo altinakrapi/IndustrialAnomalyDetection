@@ -67,6 +67,7 @@ class DashboardAnomalyVisibilityTests(unittest.TestCase):
         device_run = AnalysisRun(
             device_id=device.id,
             equipment_measurement_id=measurement.id,
+            execution_type="measurement",
             source_type="equipment",
             status="completed",
             metrics={},

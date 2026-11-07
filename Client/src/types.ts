@@ -172,6 +172,17 @@ export type AnomalySummary = {
   rejected_false_positives: number
   source_type?: 'equipment' | 'dataset'
 }
+export type GroupedAnomalyDevice = {
+  device_id: number
+  device_name: string
+  device_code: string
+  source_types: string[]
+  anomaly_count: number
+  measurement_count: number
+  highest_severity: string
+  latest_at: string
+  not_reviewed_count: number
+}
 export type Maintenance = {
   id: number; title: string; description?: string; device_id: number | null; device_name?: string | null
   dataset_id?: number | null; dataset_name?: string | null; anomaly_id?: number

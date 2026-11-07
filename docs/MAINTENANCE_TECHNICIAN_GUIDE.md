@@ -4,6 +4,8 @@
 
 Open **Anomalies**, select an authorized device, and inspect the source type and evidence. Add a comment, confirm a fault, mark a false alarm, or request more data.
 
+The Anomalies page groups authorized equipment by device, then by parameter. Only devices assigned to you are available, and each device page contains up to 50 measurements. Use **Flat list** to change presentation. Device, period, source, and status filters and CSV export are available. The page is not an episode tree and has no separate unlinked-episode group. Submit feedback and create maintenance orders from an individual anomaly; there is no episode-based maintenance-order workflow. Episode feedback is available through an API operation, not as a separate episode-tree UI action.
+
 ## Complete an order
 
 Open **Maintenance**, select the assigned order, record inspections or actions, and update the status.

@@ -31,6 +31,12 @@ from app.shared.models import (
 from app.modules.maintenance.api.router import MaintenanceOrderInput, order_payload
 from app.modules.anomaly_detection.infrastructure.repository import (
     device_anomalies_query,
+    excluded_non_operational_analysis_run_ids,
+    operational_equipment_anomaly_filter,
+)
+from app.modules.anomaly_detection.application.device_anomaly_service import (
+    grouped_device_summary,
+    paged_device_anomalies,
 )
 from app.modules.devices.application.measurement_severity import measurement_severity
 
@@ -390,6 +396,7 @@ def anomaly_payload(anomaly: Anomaly) -> dict:
 
 def _anomaly_query(
     *,
+    db: Session | None = None,
     source_type: str | None = "equipment",
     include_test_data: bool = False,
     include_dataset: bool = False,
@@ -420,7 +427,10 @@ def _anomaly_query(
     )
     if source_type == "equipment":
         equipment_filter = and_(
-            *_equipment_anomaly_filters(include_test_data=include_test_data)
+            *_equipment_anomaly_filters(
+                include_test_data=include_test_data,
+                db=db,
+            )
         )
         if include_dataset:
             query = query.where(
@@ -442,7 +452,12 @@ def _anomaly_query(
     elif source_type == "all":
         query = query.where(
             or_(
-                and_(*_equipment_anomaly_filters(include_test_data=True)),
+                and_(
+                    *_equipment_anomaly_filters(
+                        include_test_data=True,
+                        db=db,
+                    )
+                ),
                 and_(
                     AnalysisRun.source_type == "dataset",
                     Anomaly.equipment_measurement_id.is_(None),
@@ -522,27 +537,20 @@ def _anomaly_query(
     return query
 
 
-def _equipment_anomaly_filters(*, include_test_data: bool = False):
-    filters = [
-        AnalysisRun.source_type == "equipment",
-        AnalysisRun.dataset_id.is_(None),
-        AnalysisRun.equipment_measurement_id == Anomaly.equipment_measurement_id,
-        Anomaly.equipment_measurement_id.is_not(None),
-        Anomaly.measurement_record_id.is_(None),
-        EquipmentParameter.device_id == AnalysisRun.device_id,
-        AnalysisRun.device.has(Device.is_registered.is_(True)),
-    ]
-    if include_test_data:
-        filters.append(
-            EquipmentMeasurement.source_type.in_(
-                ("manual", "sensor", "simulated")
-            )
-        )
-    else:
-        filters.append(
-            EquipmentMeasurement.source_type.in_(("manual", "sensor"))
-        )
-    return tuple(filters)
+def _equipment_anomaly_filters(
+    *,
+    include_test_data: bool = False,
+    db: Session | None = None,
+):
+    excluded_run_ids = (
+        excluded_non_operational_analysis_run_ids(db)
+        if db is not None
+        else None
+    )
+    return operational_equipment_anomaly_filter(
+        include_test_data=include_test_data,
+        excluded_run_ids=excluded_run_ids,
+    )
 
 
 @router.get("")
@@ -567,6 +575,7 @@ def list_anomalies(
     db: Session = Depends(get_db),
 ) -> list[dict]:
     query = _anomaly_query(
+        db=db,
         source_type=source_type,
         include_test_data=include_test_data,
         include_dataset=include_dataset,
@@ -596,6 +605,7 @@ def anomaly_summary(
     db: Session = Depends(get_db),
 ) -> dict:
     source_query = _anomaly_query(
+        db=db,
         source_type=source_type,
         include_test_data=include_test_data,
         include_dataset=include_dataset,
@@ -694,6 +704,7 @@ def page_anomalies(
     db: Session = Depends(get_db),
 ) -> dict:
     filters = {
+        "db": db,
         "source_type": source_type,
         "include_test_data": include_test_data,
         "include_dataset": include_dataset,
@@ -746,6 +757,7 @@ def page_anomalies(
             items.append(payload)
         return {
             "total": len(deduplicated),
+            "anomaly_row_total": len(raw_anomalies),
             "limit": limit,
             "offset": offset,
             "deduplicated_by_equipment_measurement": True,
@@ -761,12 +773,131 @@ def page_anomalies(
             .offset(offset)
         )
     )
+    total = db.scalar(count_query) or 0
     return {
-        "total": db.scalar(count_query) or 0,
+        "total": total,
+        "anomaly_row_total": total,
         "limit": limit,
         "offset": offset,
         "items": [anomaly_payload(anomaly) for anomaly in anomalies],
     }
+
+
+@router.get("/devices/grouped")
+def grouped_device_anomalies(
+    source_type: str = "equipment",
+    include_test_data: bool = True,
+    include_dataset: bool = False,
+    measurement_source_type: str | None = None,
+    status_filter: str | None = None,
+    device_id: int | None = None,
+    dataset_id: int | None = None,
+    analysis_id: int | None = None,
+    severity: str | None = None,
+    algorithm: str | None = None,
+    parameter: str | None = None,
+    search: str | None = None,
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    if source_type not in {"equipment", "dataset", "all"}:
+        raise HTTPException(
+            status_code=422,
+            detail="source_type must be equipment, dataset, or all",
+        )
+    if source_type != "equipment":
+        return {"total": 0, "measurement_total": 0, "devices": []}
+    return grouped_device_summary(
+        db=db,
+        anomaly_query=_anomaly_query,
+        user=user,
+        filters={
+            "db": db,
+            "source_type": source_type,
+            "include_test_data": include_test_data,
+            "include_dataset": include_dataset,
+            "measurement_source_type": measurement_source_type,
+            "status_filter": status_filter,
+            "device_id": device_id,
+            "dataset_id": dataset_id,
+            "analysis_id": analysis_id,
+            "severity": severity,
+            "algorithm": algorithm,
+            "parameter": parameter,
+            "search": search,
+            "start_date": start_date,
+            "end_date": end_date,
+        },
+    )
+
+
+@router.get("/devices/{device_id}/page")
+def page_device_anomalies(
+    device_id: int,
+    source_type: str = "equipment",
+    include_test_data: bool = True,
+    include_dataset: bool = False,
+    measurement_source_type: str | None = None,
+    status_filter: str | None = None,
+    dataset_id: int | None = None,
+    analysis_id: int | None = None,
+    severity: str | None = None,
+    algorithm: str | None = None,
+    parameter: str | None = None,
+    search: str | None = None,
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
+    limit: int = Query(default=50, ge=1, le=50),
+    offset: int = Query(default=0, ge=0),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    device = db.get(Device, device_id)
+    if device is None or not device.is_registered:
+        raise HTTPException(status_code=404, detail="Registered device not found")
+    if (
+        user.role == "maintenance_technician"
+        and device.responsible_user_id != user.id
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="This device is not assigned to you",
+        )
+    if source_type not in {"equipment", "dataset", "all"}:
+        raise HTTPException(
+            status_code=422,
+            detail="source_type must be equipment, dataset, or all",
+        )
+    if source_type != "equipment":
+        return {"total": 0, "limit": limit, "offset": offset, "items": []}
+    return paged_device_anomalies(
+        db=db,
+        anomaly_query=_anomaly_query,
+        device=device,
+        user=user,
+        filters={
+            "db": db,
+            "source_type": source_type,
+            "include_test_data": include_test_data,
+            "include_dataset": include_dataset,
+            "measurement_source_type": measurement_source_type,
+            "status_filter": status_filter,
+            "device_id": device_id,
+            "dataset_id": dataset_id,
+            "analysis_id": analysis_id,
+            "severity": severity,
+            "algorithm": algorithm,
+            "parameter": parameter,
+            "search": search,
+            "start_date": start_date,
+            "end_date": end_date,
+        },
+        limit=limit,
+        offset=offset,
+        anomaly_payload=anomaly_payload,
+    )
 
 
 @router.get("/repeat-cases")
@@ -842,6 +973,7 @@ def export_anomalies(
         ]
     )
     query = _anomaly_query(
+        db=db,
         source_type=source_type,
         include_test_data=include_test_data,
         include_dataset=include_dataset,

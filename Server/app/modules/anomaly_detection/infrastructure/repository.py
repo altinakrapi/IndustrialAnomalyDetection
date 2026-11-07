@@ -1,6 +1,18 @@
 from sqlalchemy import and_, exists, not_, or_, select
+from sqlalchemy.orm import Session
 
-from app.shared.models import AnalysisRun, Anomaly, Dataset, Device
+from app.shared.models import (
+    AnalysisRun,
+    AnalysisComparison,
+    Anomaly,
+    Dataset,
+    Device,
+    EquipmentMeasurement,
+    EquipmentParameter,
+    NasaIMSValidation,
+    SimulatorEvaluation,
+    SimulatorTunedConfig,
+)
 
 
 def registered_device_anomaly_filter(*, include_dataset: bool = False):
@@ -32,6 +44,63 @@ def registered_device_anomaly_filter(*, include_dataset: bool = False):
             ),
         )
     return visibility_filter
+
+
+def operational_equipment_anomaly_filter(
+    *,
+    include_test_data: bool = False,
+    excluded_run_ids: set[int] | None = None,
+):
+    """Return the shared predicate for live, registered equipment anomalies."""
+    source_types = ("manual", "sensor", "simulated") if include_test_data else (
+        "manual",
+        "sensor",
+    )
+    filters = [
+        Anomaly.archived_at.is_(None),
+        Anomaly.measurement_record_id.is_(None),
+        Anomaly.equipment_measurement_id.is_not(None),
+        AnalysisRun.source_type == "equipment",
+        AnalysisRun.execution_type == "measurement",
+        AnalysisRun.dataset_id.is_(None),
+        AnalysisRun.equipment_measurement_id == Anomaly.equipment_measurement_id,
+        AnalysisRun.device.has(
+            and_(
+                Device.is_registered.is_(True),
+                Device.status != "archived",
+            )
+        ),
+        AnalysisRun.equipment_measurement.has(
+            and_(
+                EquipmentMeasurement.source_type.in_(source_types),
+                EquipmentMeasurement.parameter.has(
+                    EquipmentParameter.device_id == AnalysisRun.device_id
+                ),
+            )
+        ),
+    ]
+    if excluded_run_ids:
+        filters.append(AnalysisRun.id.not_in(excluded_run_ids))
+    return tuple(filters)
+
+
+def excluded_non_operational_analysis_run_ids(db: Session) -> set[int]:
+    excluded: set[int] = set()
+    purpose_run_lists = (
+        SimulatorEvaluation.analysis_run_ids,
+        SimulatorTunedConfig.development_run_ids,
+        AnalysisComparison.analysis_ids,
+        NasaIMSValidation.analysis_run_ids,
+    )
+    for column in purpose_run_lists:
+        for run_ids in db.scalars(select(column)):
+            if isinstance(run_ids, list):
+                for run_id in run_ids:
+                    if isinstance(run_id, int) and not isinstance(run_id, bool):
+                        excluded.add(run_id)
+                    elif isinstance(run_id, str) and run_id.isdecimal():
+                        excluded.add(int(run_id))
+    return excluded
 
 
 def device_anomalies_query(*, include_dataset: bool = False):

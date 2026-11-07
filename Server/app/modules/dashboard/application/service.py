@@ -6,6 +6,8 @@ from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_current_user, get_db
 from app.modules.anomaly_detection.infrastructure.repository import (
+    excluded_non_operational_analysis_run_ids,
+    operational_equipment_anomaly_filter,
     registered_device_anomaly_filter,
 )
 from app.modules.devices.application.schedule import measurement_schedule
@@ -37,6 +39,7 @@ def dashboard(
     db: Session = Depends(get_db),
     include_dataset: bool = False,
 ) -> dict:
+    excluded_run_ids = excluded_non_operational_analysis_run_ids(db)
     order_status_counts = {
         status: count_rows(db, MaintenanceOrder, MaintenanceOrder.status == status)
         for status in ("new", "assigned", "in_progress", "on_hold", "completed")
@@ -46,7 +49,7 @@ def dashboard(
             Device.id,
             Device.name,
             EquipmentMeasurement.source_type,
-            func.count(func.distinct(Anomaly.equipment_measurement_id)),
+            func.count(Anomaly.id),
         )
         .join(AnalysisRun, AnalysisRun.device_id == Device.id)
         .join(Anomaly, Anomaly.analysis_run_id == AnalysisRun.id)
@@ -55,14 +58,13 @@ def dashboard(
             EquipmentMeasurement.id == Anomaly.equipment_measurement_id,
         )
         .where(
-            Device.is_registered.is_(True),
-            Device.status != "archived",
-            AnalysisRun.source_type == "equipment",
-            Anomaly.equipment_measurement_id.is_not(None),
-            EquipmentMeasurement.source_type.in_(("manual", "sensor", "simulated")),
+            *operational_equipment_anomaly_filter(
+                include_test_data=True,
+                excluded_run_ids=excluded_run_ids,
+            ),
         )
         .group_by(Device.id, Device.name, EquipmentMeasurement.source_type)
-        .order_by(func.count(func.distinct(Anomaly.equipment_measurement_id)).desc())
+        .order_by(func.count(Anomaly.id).desc())
     ).all()
     dataset_anomalies = db.execute(
         select(
@@ -160,6 +162,7 @@ def dashboard(
             EquipmentParameter.id == EquipmentMeasurement.parameter_id,
         )
         .where(
+            Anomaly.archived_at.is_(None),
             Anomaly.status.in_(("new", "under_review")),
             or_(
                 and_(
@@ -167,16 +170,10 @@ def dashboard(
                     Anomaly.measurement_record_id.is_not(None),
                 ),
                 and_(
-                    AnalysisRun.source_type == "equipment",
-                    AnalysisRun.dataset_id.is_(None),
-                    AnalysisRun.equipment_measurement_id
-                    == Anomaly.equipment_measurement_id,
-                    EquipmentMeasurement.id.is_not(None),
-                    Anomaly.measurement_record_id.is_(None),
-                    EquipmentMeasurement.source_type.in_(
-                        ("manual", "sensor", "simulated")
+                    *operational_equipment_anomaly_filter(
+                        include_test_data=True,
+                        excluded_run_ids=excluded_run_ids,
                     ),
-                    EquipmentParameter.device_id == AnalysisRun.device_id,
                 ),
             ),
             registered_device_anomaly_filter(include_dataset=include_dataset),
@@ -216,27 +213,12 @@ def dashboard(
     unreviewed_equipment_anomalies = db.scalar(
         select(func.count(Anomaly.id))
         .join(AnalysisRun, AnalysisRun.id == Anomaly.analysis_run_id)
-        .join(
-            EquipmentMeasurement,
-            EquipmentMeasurement.id == Anomaly.equipment_measurement_id,
-        )
-        .join(
-            EquipmentParameter,
-            EquipmentParameter.id == EquipmentMeasurement.parameter_id,
-        )
-        .join(Device, Device.id == AnalysisRun.device_id)
         .where(
             Anomaly.status.in_(("new", "under_review")),
-            Anomaly.measurement_record_id.is_(None),
-            Anomaly.equipment_measurement_id.is_not(None),
-            AnalysisRun.source_type == "equipment",
-            AnalysisRun.dataset_id.is_(None),
-            AnalysisRun.equipment_measurement_id
-            == Anomaly.equipment_measurement_id,
-            EquipmentMeasurement.source_type.in_(("manual", "sensor", "simulated")),
-            EquipmentParameter.device_id == AnalysisRun.device_id,
-            Device.is_registered.is_(True),
-            Device.status != "archived",
+            *operational_equipment_anomaly_filter(
+                include_test_data=True,
+                excluded_run_ids=excluded_run_ids,
+            ),
         )
     ) or 0
     recent_activity = db.scalars(
@@ -259,9 +241,7 @@ def dashboard(
             EquipmentMeasurement.id == Anomaly.equipment_measurement_id,
         )
         .where(
-            Anomaly.archived_at.is_(None),
-            AnalysisRun.source_type == "equipment",
-            EquipmentMeasurement.source_type.in_(("manual", "sensor", "simulated")),
+            *operational_equipment_anomaly_filter(include_test_data=True),
         )
         .group_by(equipment_severity)
     ).all():
@@ -303,23 +283,16 @@ def dashboard(
                     )
                 )
             ) or 0,
-            "equipment_anomalies": count_rows(
-                db,
-                Anomaly,
-                Anomaly.equipment_measurement_id.is_not(None),
-                Anomaly.analysis_run.has(
-                    AnalysisRun.source_type == "equipment"
-                ),
-                Anomaly.equipment_measurement.has(
-                    EquipmentMeasurement.source_type.in_(("manual", "sensor", "simulated"))
-                ),
-                Anomaly.analysis_run.has(
-                    AnalysisRun.device.has(Device.is_registered.is_(True))
-                ),
-                Anomaly.analysis_run.has(
-                    AnalysisRun.device.has(Device.status != "archived")
-                ),
-            ),
+            "equipment_anomalies": db.scalar(
+                select(func.count(Anomaly.id))
+                .join(AnalysisRun, AnalysisRun.id == Anomaly.analysis_run_id)
+                .where(
+                    *operational_equipment_anomaly_filter(
+                        include_test_data=True,
+                        excluded_run_ids=excluded_run_ids,
+                    )
+                )
+            ) or 0,
             "dataset_anomalies": count_rows(
                 db,
                 Anomaly,

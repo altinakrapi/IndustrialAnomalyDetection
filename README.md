@@ -36,7 +36,7 @@ cd tools\sensor_simulator; python .\simulator.py --config .\config.json setup
 python .\simulator.py --config .\config.json run
 ```
 
-Sign in, open **Overview**, then open **Anomalies**. Simulator readings remain labelled `simulated`.
+Sign in, open **Overview**, then open **Anomalies**. The page groups operational anomalies by device and then parameter, with up to 50 measurements per device page. Use the flat-list toggle to switch presentation; device, period, source, and status filters and CSV export remain available. Dataset anomalies remain in dataset analysis, not the equipment view. Simulator readings remain labelled `simulated`.
 
 ## Database migrations
 
