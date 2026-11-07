@@ -1,4 +1,4 @@
-import type { Anomaly } from '../types'
+import type { Anomaly, AnomalyTimeBucket } from '../types'
 
 export type ParameterAnomalyGroup = {
   parameterId: number | null
@@ -43,6 +43,86 @@ export function groupedDeviceCountTotal<
     (total, device) => total + Number(device.anomaly_count),
     0,
   )
+}
+
+export type ParameterBucketGroup = {
+  parameterId: number
+  parameterName: string
+  buckets: AnomalyTimeBucket[]
+}
+
+export function formatBucketRange(
+  bucketStart: string,
+  bucketMinutes: number,
+  timeZone: string,
+): string {
+  const startParts = new Intl.DateTimeFormat('en-GB', {
+    timeZone,
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(new Date(bucketStart))
+  const parts = Object.fromEntries(
+    startParts
+      .filter((part) => part.type !== 'literal')
+      .map((part) => [part.type, part.value]),
+  )
+  const wallClockStart = Date.UTC(
+    Number(parts.year),
+    Number(parts.month) - 1,
+    Number(parts.day),
+    Number(parts.hour),
+    Number(parts.minute),
+  )
+  const wallClockEnd = new Date(wallClockStart + (bucketMinutes - 1) * 60_000)
+  const formatDate = (date: Date) => new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'UTC',
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  }).format(date)
+  const formatTime = (date: Date) => new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'UTC',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).format(date)
+  const startDate = new Date(wallClockStart)
+  const dateLabel = formatDate(startDate)
+  const endDateLabel = formatDate(wallClockEnd)
+  const dateRange = dateLabel === endDateLabel
+    ? dateLabel
+    : `${dateLabel} – ${endDateLabel}`
+  return `${dateRange}, ${formatTime(startDate)} – ${formatTime(wallClockEnd)}`
+}
+
+export function groupBucketsByParameter(
+  buckets: AnomalyTimeBucket[],
+): ParameterBucketGroup[] {
+  const grouped = new Map<number, ParameterBucketGroup>()
+  for (const bucket of buckets) {
+    const group = grouped.get(bucket.parameter_id) ?? {
+      parameterId: bucket.parameter_id,
+      parameterName: bucket.parameter_name,
+      buckets: [],
+    }
+    group.buckets.push(bucket)
+    grouped.set(bucket.parameter_id, group)
+  }
+  return [...grouped.values()]
+    .map((group) => ({
+      ...group,
+      buckets: [...group.buckets].sort(
+        (a, b) => Date.parse(b.bucket_start) - Date.parse(a.bucket_start),
+      ),
+    }))
+    .sort((a, b) => (
+      Date.parse(b.buckets[0]?.bucket_start ?? '')
+      - Date.parse(a.buckets[0]?.bucket_start ?? '')
+    ))
 }
 
 export function reconcileGroupedDeviceCounts<

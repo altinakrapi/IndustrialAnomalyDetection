@@ -4,7 +4,7 @@
 
 Hap **Anomalies**, zgjidh pajisjen e autorizuar dhe lexo llojin e burimit dhe evidencen. Shto koment, konfirmo defektin, shëno alarm të rremë ose kërko të dhëna shtesë.
 
-Faqja **Anomalies** i grupon pajisjet e autorizuara sipas pajisjes dhe pastaj sipas parametrit. Shfaqen vetëm pajisjet që të janë caktuar dhe çdo faqe e pajisjes përmban deri në 50 matje. Përdor **Flat list** për të ndryshuar paraqitjen. Filtrat për pajisjen, periudhën, burimin dhe statusin, si dhe eksporti CSV, janë të disponueshëm. Faqja nuk është pemë episodesh dhe nuk ka grup të veçantë për anomalitë e palidhura me episode. Dërgo feedback dhe krijo porosi mirëmbajtjeje nga një anomali individuale; nuk ka rrjedhë pune për porosi mirëmbajtjeje nga episodi. Feedback-u mbi episodin ofrohet përmes një operacioni API, jo si veprim i veçantë në ndërfaqen e pemës së episodeve.
+Faqja **Anomalies** i grupon pajisjet e autorizuara sipas pajisjes, parametrit dhe intervaleve kohore kalendarike. Shfaqen vetem pajisjet qe te jane caktuar. Parazgjedhja eshte 10 minuta, me mundesi 1, 5, 10, 15, 30 dhe 60 minuta; cdo rresht tregon intervalin kohor sipas zones se shfletuesit. Permbledhja e intervalit tregon numrin e anomalive, diapazonin e vlerave dhe njesine, ashpersine me te larte, detektoret, statusin dhe anomalite e pashqyrtuara. Hap nje interval per te ngarkuar anomalite (deri ne 50 per faqe), pastaj zgjidh **Open details** per te shqyrtuar evidencen dhe per te derguar feedback. Cdo faqe permban deri ne 50 intervale. **Flat list** ndryshon paraqitjen; filtrat per pajisje, parameter, periudhe, burim, status, ashpersi, detektor dhe kerkim, si dhe eksporti CSV, mbeten te disponueshme.
 
 ## Perfundo nje porosi
 

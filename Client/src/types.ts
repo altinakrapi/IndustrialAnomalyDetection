@@ -183,6 +183,19 @@ export type GroupedAnomalyDevice = {
   latest_at: string
   not_reviewed_count: number
 }
+export type AnomalyTimeBucket = {
+  bucket_start: string
+  parameter_id: number
+  parameter_name: string
+  anomaly_count: number
+  minimum_value: number | null
+  maximum_value: number | null
+  unit: string | null
+  highest_severity: string
+  detectors: string[]
+  not_reviewed_count: number
+  review_status: string
+}
 export type Maintenance = {
   id: number; title: string; description?: string; device_id: number | null; device_name?: string | null
   dataset_id?: number | null; dataset_name?: string | null; anomaly_id?: number

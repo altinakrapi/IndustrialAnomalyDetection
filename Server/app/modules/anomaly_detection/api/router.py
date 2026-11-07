@@ -36,7 +36,10 @@ from app.modules.anomaly_detection.infrastructure.repository import (
 )
 from app.modules.anomaly_detection.application.device_anomaly_service import (
     grouped_device_summary,
+    paged_anomalies_in_bucket,
+    paged_device_anomaly_buckets,
     paged_device_anomalies,
+    validate_bucket_minutes,
 )
 from app.modules.devices.application.measurement_severity import measurement_severity
 
@@ -830,6 +833,150 @@ def grouped_device_anomalies(
             "start_date": start_date,
             "end_date": end_date,
         },
+    )
+
+
+@router.get("/devices/{device_id}/buckets")
+def page_device_anomaly_buckets(
+    device_id: int,
+    source_type: str = "equipment",
+    include_test_data: bool = True,
+    include_dataset: bool = False,
+    measurement_source_type: str | None = None,
+    status_filter: str | None = None,
+    dataset_id: int | None = None,
+    analysis_id: int | None = None,
+    severity: str | None = None,
+    algorithm: str | None = None,
+    parameter: str | None = None,
+    search: str | None = None,
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
+    bucket_minutes: int = 10,
+    timezone_name: str = Query(default="UTC", alias="timezone"),
+    limit: int = Query(default=50, ge=1, le=50),
+    offset: int = Query(default=0, ge=0),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    device = db.get(Device, device_id)
+    if device is None or not device.is_registered:
+        raise HTTPException(status_code=404, detail="Registered device not found")
+    if source_type not in {"equipment", "dataset", "all"}:
+        raise HTTPException(
+            status_code=422,
+            detail="source_type must be equipment, dataset, or all",
+        )
+    validate_bucket_minutes(bucket_minutes)
+    if source_type != "equipment":
+        return {
+            "total": 0,
+            "anomaly_total": 0,
+            "limit": limit,
+            "offset": offset,
+            "bucket_minutes": bucket_minutes,
+            "timezone": timezone_name,
+            "items": [],
+        }
+    return paged_device_anomaly_buckets(
+        db=db,
+        anomaly_query=_anomaly_query,
+        device=device,
+        user=user,
+        filters={
+            "db": db,
+            "source_type": source_type,
+            "include_test_data": include_test_data,
+            "include_dataset": include_dataset,
+            "measurement_source_type": measurement_source_type,
+            "status_filter": status_filter,
+            "device_id": device_id,
+            "dataset_id": dataset_id,
+            "analysis_id": analysis_id,
+            "severity": severity,
+            "algorithm": algorithm,
+            "parameter": parameter,
+            "search": search,
+            "start_date": start_date,
+            "end_date": end_date,
+        },
+        timezone_name=timezone_name,
+        bucket_minutes=bucket_minutes,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/devices/{device_id}/bucket-anomalies")
+def page_anomalies_in_device_bucket(
+    device_id: int,
+    parameter_id: int = Query(ge=1),
+    bucket_start: datetime = Query(),
+    source_type: str = "equipment",
+    include_test_data: bool = True,
+    include_dataset: bool = False,
+    measurement_source_type: str | None = None,
+    status_filter: str | None = None,
+    dataset_id: int | None = None,
+    analysis_id: int | None = None,
+    severity: str | None = None,
+    algorithm: str | None = None,
+    parameter: str | None = None,
+    search: str | None = None,
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
+    bucket_minutes: int = 10,
+    timezone_name: str = Query(default="UTC", alias="timezone"),
+    limit: int = Query(default=50, ge=1, le=50),
+    offset: int = Query(default=0, ge=0),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    if bucket_start.tzinfo is None:
+        raise HTTPException(
+            status_code=422,
+            detail="bucket_start must include a UTC offset",
+        )
+    validate_bucket_minutes(bucket_minutes)
+    device = db.get(Device, device_id)
+    if device is None or not device.is_registered:
+        raise HTTPException(status_code=404, detail="Registered device not found")
+    if source_type not in {"equipment", "dataset", "all"}:
+        raise HTTPException(
+            status_code=422,
+            detail="source_type must be equipment, dataset, or all",
+        )
+    if source_type != "equipment":
+        return {"total": 0, "limit": limit, "offset": offset, "items": []}
+    return paged_anomalies_in_bucket(
+        db=db,
+        anomaly_query=_anomaly_query,
+        device=device,
+        user=user,
+        filters={
+            "db": db,
+            "source_type": source_type,
+            "include_test_data": include_test_data,
+            "include_dataset": include_dataset,
+            "measurement_source_type": measurement_source_type,
+            "status_filter": status_filter,
+            "device_id": device_id,
+            "dataset_id": dataset_id,
+            "analysis_id": analysis_id,
+            "severity": severity,
+            "algorithm": algorithm,
+            "parameter": parameter,
+            "search": search,
+            "start_date": start_date,
+            "end_date": end_date,
+        },
+        parameter_id=parameter_id,
+        bucket_start=bucket_start,
+        timezone_name=timezone_name,
+        bucket_minutes=bucket_minutes,
+        limit=limit,
+        offset=offset,
+        anomaly_payload=anomaly_payload,
     )
 
 
