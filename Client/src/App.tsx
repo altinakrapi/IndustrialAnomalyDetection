@@ -72,6 +72,8 @@ function App() {
   const [signupEnabled, setSignupEnabled] = useState(false)
   const [page, setPage] = useState<Page>('Overview')
   const [deviceFocusId, setDeviceFocusId] = useState<number | undefined>()
+  const [deviceListScrollY, setDeviceListScrollY] = useState(0)
+  const [deviceInitialTab, setDeviceInitialTab] = useState<'Overview' | 'Parameters' | 'Measurements' | 'Analyses' | 'Maintenance' | 'Datasets'>('Overview')
   const [notice, setNotice] = useState<Notice | null>(null)
   const [loading, setLoading] = useState(false)
   const [search, setSearch] = useState('')
@@ -500,7 +502,7 @@ function App() {
       <BrandLogo className="mb-8 min-w-0" />
       <nav className="flex gap-1 overflow-x-auto lg:mt-3 lg:flex-col lg:gap-1.5 lg:overflow-y-auto" aria-label="Main navigation">
           {visibleNavigation.map(({ name, icon: Icon }) => (
-            <button key={name} className={`flex shrink-0 items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition ${page === name ? 'bg-forest-50 text-forest-700 hover:bg-forest-50 hover:text-forest-700' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'}`} onClick={() => { setPage(name); setSearch('') }}>
+            <button key={name} className={`flex shrink-0 items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition ${page === name ? 'bg-forest-50 text-forest-700 hover:bg-forest-50 hover:text-forest-700' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'}`} onClick={() => { setPage(name); setSearch(''); if (name === 'Devices') { setDeviceFocusId(undefined); setDeviceInitialTab('Overview') } }}>
               <Icon size={18} strokeWidth={1.8} /><span>{name}</span>
               {name === 'Anomalies' && unreviewedEquipmentAnomalies > 0 ? <span className="ml-auto rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700" aria-label={`${unreviewedEquipmentAnomalies} unreviewed equipment anomalies`} title="Unreviewed registered-equipment anomalies">{unreviewedEquipmentAnomalies}</span> : null}
               {name === 'Notifications' && unreadNotifications > 0 ? <span className="ml-auto rounded-full bg-forest-100 px-2 py-0.5 text-[10px] font-bold text-forest-700">{unreadNotifications}</span> : null}
@@ -518,7 +520,7 @@ function App() {
 
       <main className="flex min-h-screen min-w-0 flex-col">
         <header className="app-topbar sticky top-0 z-10 flex min-h-16 items-center justify-between gap-4 border-b border-slate-200 px-5 sm:px-8">
-          <div className="monitoring-breadcrumb flex items-center gap-2 text-xs text-slate-600 [&>strong]:font-semibold [&>strong]:text-slate-800"><span>Workspace</span><span>/</span><strong>{page}</strong></div>
+          <div className="monitoring-breadcrumb flex items-center gap-2 text-xs text-slate-600 [&>strong]:font-semibold [&>strong]:text-slate-800"><span>Workspace</span><span>/</span><strong>{page}</strong>{page === 'Devices' && deviceFocusId !== undefined && <><span>/</span><strong>{devices.find((device) => device.id === deviceFocusId)?.name ?? 'Device'}</strong></>}</div>
           <div className="flex items-center gap-3">
             <span className="hidden text-xs text-slate-500 sm:block">{new Date().toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</span>
             {['Devices', 'Measurements', 'Datasets', 'Analysis', 'Anomalies', 'Maintenance'].includes(page) && <label className="flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-slate-400 [&>input]:w-32 [&>input]:border-0 [&>input]:bg-transparent [&>input]:text-xs [&>input]:text-slate-700 [&>input]:outline-none sm:[&>input]:w-44"><Search size={16} /><input aria-label={`Search ${page.toLowerCase()}`} placeholder={`Search ${page.toLowerCase()}...`} value={search} onChange={(event) => setSearch(event.target.value)} /></label>}
@@ -556,15 +558,31 @@ function App() {
           </div>
         </header>
         <section className="page-content mx-auto w-full max-w-[1600px] flex-1 space-y-6 px-5 py-7 sm:px-8 sm:py-9 [&_label]:grid [&_label]:gap-1.5 [&_label]:text-xs [&_label]:font-medium [&_label]:text-slate-600 [&_input]:h-10 [&_input]:min-w-0 [&_input]:rounded-lg [&_input]:border [&_input]:border-slate-200 [&_input]:bg-white [&_input]:px-3 [&_input]:text-xs [&_input]:text-slate-800 [&_input]:outline-none [&_input]:transition [&_input]:focus:border-forest-500 [&_input]:focus:ring-2 [&_input]:focus:ring-forest-100 [&_select]:h-10 [&_select]:min-w-0 [&_select]:rounded-lg [&_select]:border [&_select]:border-slate-200 [&_select]:bg-white [&_select]:px-3 [&_select]:text-xs [&_select]:text-slate-800 [&_select]:outline-none [&_select]:focus:border-forest-500 [&_select]:focus:ring-2 [&_select]:focus:ring-forest-100 [&_textarea]:rounded-lg [&_textarea]:border [&_textarea]:border-slate-200 [&_textarea]:px-3 [&_textarea]:py-2 [&_textarea]:text-xs">
-          {notice && <NoticeBanner notice={notice} onDismiss={() => setNotice(null)} />}
+          {notice && <div className={page === 'Devices' && deviceFocusId !== undefined ? 'fixed right-4 top-20 z-50 w-[min(36rem,calc(100vw-2rem))]' : ''}><NoticeBanner notice={notice} onDismiss={() => setNotice(null)} /></div>}
           {loading && <div className="flex items-center gap-2 text-xs text-slate-500"><span className="loading-skeleton" aria-hidden="true" /> Syncing workspace data...</div>}
           {page === 'Overview' && <Overview user={user} dashboard={dashboard} onNavigate={setPage} />}
           {page === 'Monitoring' && <MonitoringPage onNavigate={(target, query, deviceId) => {
             setSearch(query ?? '')
-            if (target === 'Devices' || target === 'Anomalies') setDeviceFocusId(deviceId)
+            if (target === 'Devices') {
+              setDeviceFocusId(deviceId)
+              setDeviceInitialTab('Overview')
+            }
+            if (target === 'Anomalies') setDeviceFocusId(deviceId)
             setPage(target)
           }} />}
-          {page === 'Devices' && <><DeviceDetailPanel devices={displayedDevices} canEdit={user.role === 'administrator'} canRecord={['administrator', 'data_analyst', 'maintenance_technician'].includes(user.role)} isAdministrator={user.role === 'administrator'} currentUserId={user.id} initialDeviceId={deviceFocusId} onAction={runAction} /><DevicesPage devices={displayedDevices} canEdit={canAnalyze} isAdministrator={user.role === 'administrator'} onAction={runAction} /></>}
+          {page === 'Devices' && <>
+            <div hidden={deviceFocusId !== undefined}>
+              <DevicesPage devices={displayedDevices} canEdit={canAnalyze} isAdministrator={user.role === 'administrator'} onAction={runAction} onSelectDevice={(deviceId) => {
+                setDeviceListScrollY(window.scrollY)
+                setDeviceFocusId(deviceId)
+                setDeviceInitialTab('Overview')
+              }} />
+            </div>
+            {deviceFocusId !== undefined && <DeviceDetailPanel devices={displayedDevices} canEdit={user.role === 'administrator'} canRecord={['administrator', 'data_analyst', 'maintenance_technician'].includes(user.role)} isAdministrator={user.role === 'administrator'} currentUserId={user.id} initialDeviceId={deviceFocusId} initialTab={deviceInitialTab} onDeviceIdChange={setDeviceFocusId} onBackToDevices={() => {
+              setDeviceFocusId(undefined)
+              window.requestAnimationFrame(() => window.scrollTo(0, deviceListScrollY))
+            }} onAction={runAction} />}
+          </>}
           {page === 'Measurements' && <MeasurementsPage devices={devices} currentUserId={user.id} userRole={user.role} search={search} onAction={runAction} />}
           {page === 'Datasets' && <DatasetsPage datasets={datasets.filter((item) => `${item.name} ${item.device_name ?? ''} ${item.status}`.toLowerCase().includes(search.toLowerCase()))} canEdit={canAnalyze} onAction={runAction} />}
           {page === 'Exploration' && <ExplorationPage datasets={datasets} onAction={runAction} onNavigate={(target, query) => { setSearch(query ?? ''); setPage(target) }} />}
@@ -577,7 +595,10 @@ function App() {
             onAction={runAction}
             onNavigate={(target, query, deviceId) => {
               setSearch(query ?? '')
-              if (deviceId !== undefined) setDeviceFocusId(deviceId)
+              if (target === 'Devices') {
+                if (deviceId !== undefined) setDeviceFocusId(deviceId)
+                setDeviceInitialTab('Analyses')
+              } else if (deviceId !== undefined) setDeviceFocusId(deviceId)
               setPage(target)
             }}
           />}
