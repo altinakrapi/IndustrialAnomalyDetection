@@ -24,6 +24,11 @@ class Anomaly(Base):
             unique=True,
             postgresql_where=text("equipment_measurement_id IS NOT NULL"),
         ),
+        Index(
+            "ix_anomalies_measurement_record_id_not_null",
+            "measurement_record_id",
+            postgresql_where=text("measurement_record_id IS NOT NULL"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)

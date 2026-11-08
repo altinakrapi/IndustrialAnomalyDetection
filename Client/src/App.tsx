@@ -590,7 +590,7 @@ function App() {
           {page === 'Measurements' && <MeasurementsPage devices={devices} currentUserId={user.id} userRole={user.role} search={search} onAction={runAction} />}
           {page === 'Datasets' && <DatasetsPage datasets={datasets.filter((item) => `${item.name} ${item.device_name ?? ''} ${item.status}`.toLowerCase().includes(search.toLowerCase()))} canEdit={canAnalyze} onAction={runAction} />}
           {page === 'Exploration' && <ExplorationPage datasets={datasets} onAction={runAction} onNavigate={(target, query) => { setSearch(query ?? ''); navigateToPage(target) }} />}
-          {page === 'Analysis' && <><AnalysisTools datasets={datasets} models={models} analyses={analyses} canEdit={canAnalyze} onAction={runAction} /><div className="hidden" aria-hidden="true"><AnalysisPage datasets={[]} models={[]} analyses={[]} canEdit={false} onAction={runAction} /></div></>}
+          {page === 'Analysis' && <><AnalysisTools datasets={datasets} devices={devices} models={models} analyses={analyses} canEdit={canAnalyze} onAction={runAction} /><div className="hidden" aria-hidden="true"><AnalysisPage datasets={[]} models={[]} analyses={[]} canEdit={false} onAction={runAction} /></div></>}
           {page === 'Evaluation' && <EvaluationPage userRole={user.role} onAction={runAction} />}
           {page === 'Anomalies' && <AnomaliesPage
             devices={devices}

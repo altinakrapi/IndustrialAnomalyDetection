@@ -8,9 +8,11 @@ Open **Datasets** to upload or import data. Open **Exploration** to inspect data
 
 Open **Analysis**, choose the model configuration and input data, and run the analysis. Open the saved result to review output without treating it as a diagnosis.
 
+Analysis history separates registered equipment from NASA IMS datasets and collapses automatic per-reading equipment runs into a 24-hour summary; expand it to view the paginated readings. Device analyses use the selected parameter and its recorded source type. Comparison snapshots and simulator evaluations remain separate from analysis-run history. Administrators and Data Analysts can run analyses and compare results; Maintenance Technicians have read-only access.
+
 ## Evaluate models
 
-Open **Evaluation**. Create simulator evaluations and view tuning evidence where it is supported. NASA IMS validation has statistical evidence but no per-window labels.
+Open **Evaluation** to review simulator evaluations separately from NASA IMS validation. Simulator Precision, Recall, F1, false-alarm rate, and detection delay are computed only from stored labelled runs; development-purpose results are for exploring settings, while evaluation-purpose results are the held-aside check. NASA IMS provides descriptive bearing and time evidence, but has no per-window fault labels for accuracy metrics. Treat all scores and alerts as statistical evidence for human review, not a physical-failure diagnosis. Administrators and Data Analysts can create simulator evaluations and tune configurations; Maintenance Technicians can review results read-only.
 
 ## Compare and tune
 

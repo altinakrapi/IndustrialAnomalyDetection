@@ -19,11 +19,24 @@ export type Device = {
   id: number
   name: string
   device_code: string
+  status?: string
   source_type?: 'manual' | 'sensor' | 'simulated' | 'dataset' | string
   responsible_user_id?: number | null
   responsible_user_name?: string | null
 }
-export type ModelConfig = { id: number; name: string; algorithm: string; parameters: Record<string, unknown>; is_active?: boolean }
+export type ModelConfig = {
+  id: number
+  name: string
+  algorithm: string
+  parameters: Record<string, unknown>
+  is_active?: boolean
+  created_at?: string
+  used_in_runs?: number
+  source?: 'tuned_from_development_evidence' | 'saved_configuration'
+  tuning_limitations?: string | null
+  is_superseded?: boolean
+  superseded_reason?: string | null
+}
 export type DetectorParameter = {
   name: string
   type: 'integer' | 'integer_list' | 'number' | 'number_or_auto' | 'string' | 'string_or_number' | 'boolean' | 'json'
@@ -52,13 +65,14 @@ export type Analysis = {
   algorithm?: string
   status: string
   execution_type?: string
+  run_kind?: 'live_reading' | 'scheduled_cycle' | 'on_demand_analysis' | 'validation'
+  error_message?: string
   total_records: number
   anomalies_found: number
   metrics: Record<string, unknown>
   started_at?: string | null
   completed_at?: string | null
   duration_seconds?: number | null
-  error_message?: string
   created_at: string
 }
 export type AnalysisSummary = {
@@ -71,6 +85,16 @@ export type AnalysisSummary = {
   latest_analysis: Analysis | null
   next_scheduled_at: string | null
   schedule_enabled: boolean
+  registered_equipment: AnalysisPopulationSummary
+  datasets: AnalysisPopulationSummary
+  live_reading_24h: { total: number; failed: number }
+}
+export type AnalysisPopulationSummary = {
+  analyses: number
+  detections: number
+  measurements_flagged_unique: number
+  latest_execution: Analysis | null
+  next_scheduled_execution: string | null
 }
 export type Action = (action: () => Promise<unknown>, success: string) => Promise<void>
 export type NoticeState = { message: string; error?: boolean } | null

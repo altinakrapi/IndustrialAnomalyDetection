@@ -2,12 +2,12 @@ import csv
 import hashlib
 import io
 import json
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
-from sqlalchemy import exists, func, or_, select
+from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.orm import Session, aliased
 
 from app.api.dependencies import get_current_user, get_db, require_roles
@@ -17,6 +17,11 @@ from app.modules.analyses.domain.detectors import (
     detector_catalog,
     normalize_algorithm_name,
     resolve_ensemble_features,
+)
+from app.modules.analyses.domain.run_kinds import (
+    RunKind,
+    analysis_run_kind_expression,
+    classify_analysis_run,
 )
 from app.modules.analyses.api.simulator_evaluations import router as simulator_evaluations
 from app.modules.analyses.api.simulator_tuning import router as simulator_tuning
@@ -34,6 +39,7 @@ from app.shared.models import (
     MonitoringSchedule,
     ModelConfig,
     MeasurementRecord,
+    SimulatorTunedConfig,
     User,
 )
 from app.workers.analysis_worker import run_analysis
@@ -135,6 +141,7 @@ def analysis_payload(analysis: AnalysisRun) -> dict:
         ),
         "status": analysis.status,
         "execution_type": analysis.execution_type,
+        "run_kind": classify_analysis_run(analysis),
         "source_start_row": analysis.source_start_row,
         "source_end_row": analysis.source_end_row,
         "total_records": analysis.total_records,
@@ -152,9 +159,48 @@ def analysis_payload(analysis: AnalysisRun) -> dict:
 def list_model_configs(
     _: User = Depends(get_current_user), db: Session = Depends(get_db)
 ) -> list[dict]:
+    configs = list(db.scalars(select(ModelConfig).order_by(ModelConfig.created_at.desc())))
+    used_counts = dict(
+        db.execute(
+            select(AnalysisRun.model_config_id, func.count(AnalysisRun.id))
+            .where(AnalysisRun.model_config_id.is_not(None))
+            .group_by(AnalysisRun.model_config_id)
+        ).all()
+    )
+    tuned_configs = {
+        config.model_config_id: config
+        for config in db.scalars(
+            select(SimulatorTunedConfig).where(
+                SimulatorTunedConfig.model_config_id.is_not(None)
+            )
+        )
+    }
     return [
-        model_payload(config)
-        for config in db.scalars(select(ModelConfig).order_by(ModelConfig.created_at.desc()))
+        {
+            **model_payload(config),
+            "used_in_runs": used_counts.get(config.id, 0),
+            "source": (
+                "tuned_from_development_evidence"
+                if config.id in tuned_configs
+                else "saved_configuration"
+            ),
+            "tuning_limitations": (
+                tuned_configs[config.id].limitations
+                if config.id in tuned_configs
+                else None
+            ),
+            "is_superseded": (
+                tuned_configs[config.id].is_superseded
+                if config.id in tuned_configs
+                else False
+            ),
+            "superseded_reason": (
+                tuned_configs[config.id].superseded_reason
+                if config.id in tuned_configs
+                else None
+            ),
+        }
+        for config in configs
     ]
 
 
@@ -568,16 +614,56 @@ def analysis_summary(
     _: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
+    def population(source_type: str, measurement_column: Any) -> dict[str, Any]:
+        latest = db.scalar(
+            select(AnalysisRun)
+            .where(AnalysisRun.source_type == source_type)
+            .order_by(AnalysisRun.created_at.desc(), AnalysisRun.id.desc())
+            .limit(1)
+        )
+        return {
+            "analyses": db.scalar(
+                select(func.count(AnalysisRun.id)).where(
+                    AnalysisRun.source_type == source_type
+                )
+            ) or 0,
+            "detections": db.scalar(
+                select(func.count(Anomaly.id)).where(
+                    measurement_column.is_not(None)
+                )
+            ) or 0,
+            "measurements_flagged_unique": db.scalar(
+                select(func.count(func.distinct(measurement_column))).where(
+                    measurement_column.is_not(None)
+                )
+            ) or 0,
+            "latest_execution": analysis_payload(latest) if latest else None,
+        }
+
     status_counts = dict(
         db.execute(
             select(AnalysisRun.status, func.count(AnalysisRun.id))
             .group_by(AnalysisRun.status)
         ).all()
     )
-    schedule = db.get(MonitoringSchedule, 1)
     latest = db.scalar(
         select(AnalysisRun).order_by(AnalysisRun.created_at.desc(), AnalysisRun.id.desc()).limit(1)
     )
+    schedule = db.get(MonitoringSchedule, 1)
+    live_reading_filter = and_(
+        AnalysisRun.source_type == "equipment",
+        AnalysisRun.execution_type == "measurement",
+        AnalysisRun.total_records == 1,
+        AnalysisRun.created_at >= datetime.now(timezone.utc) - timedelta(hours=24),
+    )
+    live_reading_counts = db.execute(
+        select(
+            func.count(AnalysisRun.id),
+            func.count(AnalysisRun.id).filter(AnalysisRun.status == "failed"),
+        ).where(live_reading_filter)
+    ).one()
+    registered_equipment = population("equipment", Anomaly.equipment_measurement_id)
+    datasets = population("dataset", Anomaly.measurement_record_id)
     return {
         "total_runs": sum(status_counts.values()),
         "completed": status_counts.get("completed", 0),
@@ -585,28 +671,30 @@ def analysis_summary(
         "in_progress": sum(
             status_counts.get(state, 0) for state in ("pending", "running")
         ),
-        "anomaly_detections": db.scalar(
-            select(func.count(Anomaly.id))
-        ) or 0,
+        "anomaly_detections": (
+            registered_equipment["detections"] + datasets["detections"]
+        ),
         "unique_affected_measurements": (
-            db.scalar(
-                select(func.count(func.distinct(Anomaly.measurement_record_id))).where(
-                    Anomaly.measurement_record_id.is_not(None)
-                )
-            )
-            or 0
-        )
-        + (
-            db.scalar(
-                select(func.count(func.distinct(Anomaly.equipment_measurement_id))).where(
-                    Anomaly.equipment_measurement_id.is_not(None)
-                )
-            )
-            or 0
+            registered_equipment["measurements_flagged_unique"]
+            + datasets["measurements_flagged_unique"]
         ),
         "latest_analysis": analysis_payload(latest) if latest else None,
         "next_scheduled_at": schedule.next_run_at if schedule and schedule.enabled else None,
         "schedule_enabled": bool(schedule and schedule.enabled),
+        "registered_equipment": {
+            **registered_equipment,
+            "next_scheduled_execution": None,
+        },
+        "datasets": {
+            **datasets,
+            "next_scheduled_execution": (
+                schedule.next_run_at if schedule and schedule.enabled else None
+            ),
+        },
+        "live_reading_24h": {
+            "total": live_reading_counts[0],
+            "failed": live_reading_counts[1],
+        },
     }
 
 
@@ -617,6 +705,9 @@ def analysis_history(
     device_id: int | None = None,
     algorithm: str | None = None,
     execution_type: str | None = None,
+    source_type: Literal["dataset", "equipment"] | None = None,
+    run_kind: RunKind | None = None,
+    exclude_live_readings: bool = False,
     search: str | None = None,
     start_date: datetime | None = None,
     end_date: datetime | None = None,
@@ -649,6 +740,13 @@ def analysis_history(
         )
     if execution_type:
         filters.append(AnalysisRun.execution_type == execution_type)
+    if source_type:
+        filters.append(AnalysisRun.source_type == source_type)
+    run_kind_expression = analysis_run_kind_expression()
+    if run_kind:
+        filters.append(run_kind_expression == run_kind)
+    elif exclude_live_readings:
+        filters.append(run_kind_expression != "live_reading")
     if start_date:
         filters.append(AnalysisRun.created_at >= start_date)
     if end_date:

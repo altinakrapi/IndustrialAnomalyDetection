@@ -35,6 +35,8 @@ Generated automatically from FastAPI OpenAPI and route-function dependency decla
 | GET | `/api/v1/anomalies` | all authenticated | `app\modules\anomaly_detection\api\router.py` |
 | POST | `/api/v1/anomalies/alert-episodes/{episode_id}/feedback` | administrator, maintenance_technician | `app\modules\anomaly_detection\api\router.py` |
 | GET | `/api/v1/anomalies/devices/grouped` | all authenticated | `app\modules\anomaly_detection\api\router.py` |
+| GET | `/api/v1/anomalies/devices/{device_id}/bucket-anomalies` | all authenticated | `app\modules\anomaly_detection\api\router.py` |
+| GET | `/api/v1/anomalies/devices/{device_id}/buckets` | all authenticated | `app\modules\anomaly_detection\api\router.py` |
 | GET | `/api/v1/anomalies/devices/{device_id}/page` | all authenticated | `app\modules\anomaly_detection\api\router.py` |
 | GET | `/api/v1/anomalies/export.csv` | all authenticated | `app\modules\anomaly_detection\api\router.py` |
 | GET | `/api/v1/anomalies/feedback/export.csv` | all authenticated | `app\modules\anomaly_detection\api\router.py` |

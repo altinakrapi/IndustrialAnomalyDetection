@@ -1,0 +1,37 @@
+.evaluation-chart {
+  --evaluation-chart-text: #475569;
+  --evaluation-tooltip-background: #ffffff;
+  --evaluation-tooltip-border: #cbd5e1;
+  --evaluation-tooltip-text: #1e293b;
+}
+
+.dark .evaluation-chart {
+  --evaluation-chart-text: #c8d9c8;
+  --evaluation-tooltip-background: #20372a;
+  --evaluation-tooltip-border: #35563b;
+  --evaluation-tooltip-text: #f1f5f0;
+}
+
+.evaluation-page button:disabled {
+  border: 1px solid #7fa180;
+  background-color: #294431;
+  color: #f1f5f0;
+  opacity: 1;
+}
+
+.evaluation-chart .recharts-cartesian-axis-tick-value,
+.evaluation-chart .recharts-text.recharts-label,
+.evaluation-chart .recharts-legend-item-text {
+  fill: var(--evaluation-chart-text);
+}
+
+.evaluation-chart .recharts-default-tooltip {
+  border-color: var(--evaluation-tooltip-border) !important;
+  background-color: var(--evaluation-tooltip-background) !important;
+  color: var(--evaluation-tooltip-text) !important;
+}
+
+.evaluation-chart .recharts-tooltip-item,
+.evaluation-chart .recharts-tooltip-label {
+  color: var(--evaluation-tooltip-text) !important;
+}
