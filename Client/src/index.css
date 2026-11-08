@@ -459,3 +459,184 @@ button:not(:disabled):active {
     transition-duration: 0.01ms !important;
   }
 }
+
+:is(.app-shell, .login-shell) :is(
+  .green-panel,
+  [class~="bg-white"]:not([class~="rounded-full"]),
+  [class~="bg-white/60"]:not([class~="rounded-full"]),
+  [class~="bg-slate-50"]:not([class~="rounded-full"]),
+  [class~="bg-slate-50/60"]:not([class~="rounded-full"]),
+  [class~="bg-slate-50/70"]:not([class~="rounded-full"]),
+  [class~="bg-slate-100"]:not([class~="rounded-full"]),
+  [class~="bg-sky-50"]:not([class~="rounded-full"]),
+  [class~="bg-sky-50/30"]:not([class~="rounded-full"])
+) {
+  border-color: color-mix(in srgb, var(--color-forest-400) 24%, transparent);
+  background-color: color-mix(in srgb, var(--color-forest-700) 12%, var(--color-forest-950));
+  color: var(--color-forest-50);
+}
+
+:is(.app-shell, .login-shell) :is(
+  .green-panel,
+  [class~="bg-white"]:not([class~="rounded-full"]),
+  [class~="bg-white/60"]:not([class~="rounded-full"]),
+  [class~="bg-slate-50"]:not([class~="rounded-full"]),
+  [class~="bg-slate-50/60"]:not([class~="rounded-full"]),
+  [class~="bg-slate-50/70"]:not([class~="rounded-full"]),
+  [class~="bg-slate-100"]:not([class~="rounded-full"]),
+  [class~="bg-sky-50"]:not([class~="rounded-full"]),
+  [class~="bg-sky-50/30"]:not([class~="rounded-full"])
+) :is(
+  [class~="text-slate-900"],
+  [class~="text-slate-800"],
+  [class~="text-slate-700"],
+  [class~="text-sky-900"],
+  [class~="text-sky-800"],
+  [class~="text-sky-700"],
+  [class~="text-forest-800"],
+  [class~="text-forest-700"],
+  [class~="text-forest-600"]
+):not([class~="rounded-full"]) {
+  color: var(--color-forest-50);
+}
+
+:is(.app-shell, .login-shell) :is(
+  .green-panel,
+  [class~="bg-white"]:not([class~="rounded-full"]),
+  [class~="bg-white/60"]:not([class~="rounded-full"]),
+  [class~="bg-slate-50"]:not([class~="rounded-full"]),
+  [class~="bg-slate-50/60"]:not([class~="rounded-full"]),
+  [class~="bg-slate-50/70"]:not([class~="rounded-full"]),
+  [class~="bg-slate-100"]:not([class~="rounded-full"]),
+  [class~="bg-sky-50"]:not([class~="rounded-full"]),
+  [class~="bg-sky-50/30"]:not([class~="rounded-full"])
+) :is(
+  [class~="text-slate-600"],
+  [class~="text-slate-500"],
+  [class~="text-slate-400"],
+  [class~="text-sky-600"],
+  [class~="text-sky-500"],
+  [class~="text-forest-500"],
+  [class~="text-forest-400"]
+):not([class~="rounded-full"]) {
+  color: var(--color-forest-200);
+}
+
+:is(.app-shell, .login-shell) :is(
+  .green-panel,
+  [class~="bg-white"]:not([class~="rounded-full"]),
+  [class~="bg-white/60"]:not([class~="rounded-full"]),
+  [class~="bg-slate-50"]:not([class~="rounded-full"]),
+  [class~="bg-slate-50/60"]:not([class~="rounded-full"]),
+  [class~="bg-slate-50/70"]:not([class~="rounded-full"]),
+  [class~="bg-slate-100"]:not([class~="rounded-full"]),
+  [class~="bg-sky-50"]:not([class~="rounded-full"]),
+  [class~="bg-sky-50/30"]:not([class~="rounded-full"])
+):is(
+  [class~="text-slate-900"],
+  [class~="text-slate-800"],
+  [class~="text-slate-700"],
+  [class~="text-sky-900"],
+  [class~="text-sky-800"],
+  [class~="text-sky-700"],
+  [class~="text-forest-800"],
+  [class~="text-forest-700"],
+  [class~="text-forest-600"]
+) {
+  color: var(--color-forest-50);
+}
+
+:is(.app-shell, .login-shell) :is(
+  .green-panel,
+  [class~="bg-white"]:not([class~="rounded-full"]),
+  [class~="bg-white/60"]:not([class~="rounded-full"]),
+  [class~="bg-slate-50"]:not([class~="rounded-full"]),
+  [class~="bg-slate-50/60"]:not([class~="rounded-full"]),
+  [class~="bg-slate-50/70"]:not([class~="rounded-full"]),
+  [class~="bg-slate-100"]:not([class~="rounded-full"]),
+  [class~="bg-sky-50"]:not([class~="rounded-full"]),
+  [class~="bg-sky-50/30"]:not([class~="rounded-full"])
+):is(
+  [class~="text-slate-600"],
+  [class~="text-slate-500"],
+  [class~="text-slate-400"],
+  [class~="text-sky-600"],
+  [class~="text-sky-500"],
+  [class~="text-forest-500"],
+  [class~="text-forest-400"]
+) {
+  color: var(--color-forest-200);
+}
+
+:is(.app-shell, .login-shell) :is(
+  .green-panel,
+  [class~="bg-white"]:not([class~="rounded-full"]),
+  [class~="bg-white/60"]:not([class~="rounded-full"]),
+  [class~="bg-slate-50"]:not([class~="rounded-full"]),
+  [class~="bg-slate-50/60"]:not([class~="rounded-full"]),
+  [class~="bg-slate-50/70"]:not([class~="rounded-full"]),
+  [class~="bg-slate-100"]:not([class~="rounded-full"]),
+  [class~="bg-sky-50"]:not([class~="rounded-full"]),
+  [class~="bg-sky-50/30"]:not([class~="rounded-full"])
+) > :is(strong, h1, h2, h3, h4) {
+  color: var(--color-forest-50);
+}
+
+:is(.app-shell, .login-shell) :is(
+  .green-panel,
+  [class~="bg-white"]:not([class~="rounded-full"]),
+  [class~="bg-white/60"]:not([class~="rounded-full"]),
+  [class~="bg-slate-50"]:not([class~="rounded-full"]),
+  [class~="bg-slate-50/60"]:not([class~="rounded-full"]),
+  [class~="bg-slate-50/70"]:not([class~="rounded-full"]),
+  [class~="bg-slate-100"]:not([class~="rounded-full"]),
+  [class~="bg-sky-50"]:not([class~="rounded-full"]),
+  [class~="bg-sky-50/30"]:not([class~="rounded-full"])
+) > :is(p, small) {
+  color: var(--color-forest-200);
+}
+
+:is(.app-shell, .login-shell) :is(
+  [class~="hover:bg-slate-50"],
+  [class~="hover:bg-slate-50/70"],
+  [class~="hover:bg-slate-100"]
+):hover {
+  background-color: color-mix(in srgb, var(--color-forest-600) 16%, var(--color-forest-950));
+  color: var(--color-forest-50);
+}
+
+.app-sidebar,
+.app-topbar,
+.notification-popover,
+.login-card {
+  border-color: color-mix(in srgb, var(--color-forest-400) 24%, transparent);
+  background-color: color-mix(in srgb, var(--color-forest-700) 12%, var(--color-forest-950));
+  color: var(--color-forest-50);
+}
+
+.app-sidebar :is([class~="text-slate-900"], [class~="text-slate-800"], [class~="text-slate-700"]),
+.app-topbar :is([class~="text-slate-900"], [class~="text-slate-800"], [class~="text-slate-700"]),
+.login-card :is([class~="text-slate-900"], [class~="text-slate-800"], [class~="text-slate-700"]) {
+  color: var(--color-forest-50);
+}
+
+.app-sidebar :is([class~="text-slate-600"], [class~="text-slate-500"], [class~="text-slate-400"]),
+.app-topbar :is([class~="text-slate-600"], [class~="text-slate-500"], [class~="text-slate-400"]),
+.login-card :is([class~="text-slate-600"], [class~="text-slate-500"], [class~="text-slate-400"]),
+.page-content label {
+  color: var(--color-forest-200);
+}
+
+.app-sidebar nav button.bg-forest-50 {
+  background-color: color-mix(in srgb, var(--color-forest-600) 16%, var(--color-forest-950));
+  color: var(--color-forest-50);
+}
+
+.notification-popover [class~="bg-forest-50/50"] {
+  background-color: color-mix(in srgb, var(--color-forest-600) 12%, var(--color-forest-950));
+}
+
+.page-content thead th {
+  background-color: color-mix(in srgb, var(--color-forest-700) 12%, var(--color-forest-950));
+  color: var(--color-forest-200);
+}

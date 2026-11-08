@@ -75,6 +75,10 @@ function App() {
   const [deviceListScrollY, setDeviceListScrollY] = useState(0)
   const [deviceInitialTab, setDeviceInitialTab] = useState<'Overview' | 'Parameters' | 'Measurements' | 'Analyses' | 'Maintenance' | 'Datasets'>('Overview')
   const [notice, setNotice] = useState<Notice | null>(null)
+  function navigateToPage(nextPage: Page) {
+    if (nextPage !== page) setNotice(null)
+    setPage(nextPage)
+  }
   const [loading, setLoading] = useState(false)
   const [search, setSearch] = useState('')
   const [dashboard, setDashboard] = useState<DashboardData | null>(null)
@@ -322,7 +326,7 @@ function App() {
       })
       setToken(result.access_token)
       setUser(result.user)
-      setPage('Overview')
+      navigateToPage('Overview')
       setNotice({
         kind: 'success',
         text: isRegistration
@@ -380,7 +384,7 @@ function App() {
   function logout() {
     setToken(null)
     setUser(null)
-    setPage('Overview')
+    navigateToPage('Overview')
     setNotificationsOpen(false)
     setSignOutConfirmationOpen(false)
   }
@@ -397,7 +401,7 @@ function App() {
         setNotice({ kind: 'error', text: message })
       }
     }
-    setPage('Notifications')
+    navigateToPage('Notifications')
   }
 
   async function runAction(action: () => Promise<unknown>, success: string) {
@@ -502,7 +506,7 @@ function App() {
       <BrandLogo className="mb-8 min-w-0" />
       <nav className="flex gap-1 overflow-x-auto lg:mt-3 lg:flex-col lg:gap-1.5 lg:overflow-y-auto" aria-label="Main navigation">
           {visibleNavigation.map(({ name, icon: Icon }) => (
-            <button key={name} className={`flex shrink-0 items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition ${page === name ? 'bg-forest-50 text-forest-700 hover:bg-forest-50 hover:text-forest-700' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'}`} onClick={() => { setPage(name); setSearch(''); if (name === 'Devices') { setDeviceFocusId(undefined); setDeviceInitialTab('Overview') } }}>
+            <button key={name} className={`flex shrink-0 items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition ${page === name ? 'bg-forest-50 text-forest-700 hover:bg-forest-50 hover:text-forest-700' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'}`} onClick={() => { navigateToPage(name); setSearch(''); if (name === 'Devices') { setDeviceFocusId(undefined); setDeviceInitialTab('Overview') } }}>
               <Icon size={18} strokeWidth={1.8} /><span>{name}</span>
               {name === 'Anomalies' && unreviewedEquipmentAnomalies > 0 ? <span className="ml-auto rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700" aria-label={`${unreviewedEquipmentAnomalies} unreviewed equipment anomalies`} title="Unreviewed registered-equipment anomalies">{unreviewedEquipmentAnomalies}</span> : null}
               {name === 'Notifications' && unreadNotifications > 0 ? <span className="ml-auto rounded-full bg-forest-100 px-2 py-0.5 text-[10px] font-bold text-forest-700">{unreadNotifications}</span> : null}
@@ -551,7 +555,7 @@ function App() {
                   </button>)}
                   {notifications.length === 0 && !notificationError && <p className="px-4 py-6 text-center text-xs text-slate-500">You’re all caught up.</p>}
                 </div>
-                <button className="w-full px-4 py-3 text-center text-xs font-semibold text-forest-700 hover:bg-forest-50" onClick={() => { setNotificationsOpen(false); setPage('Notifications') }}>View all notifications</button>
+                <button className="w-full px-4 py-3 text-center text-xs font-semibold text-forest-700 hover:bg-forest-50" onClick={() => { setNotificationsOpen(false); navigateToPage('Notifications') }}>View all notifications</button>
               </div>}
             </div>
             <button className="grid size-9 place-items-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-900 logout-button" aria-label="Sign out" title="Sign out" onClick={() => setSignOutConfirmationOpen(true)}><LogOut size={18} /></button>
@@ -560,7 +564,7 @@ function App() {
         <section className="page-content mx-auto w-full max-w-[1600px] flex-1 space-y-6 px-5 py-7 sm:px-8 sm:py-9 [&_label]:grid [&_label]:gap-1.5 [&_label]:text-xs [&_label]:font-medium [&_label]:text-slate-600 [&_input]:h-10 [&_input]:min-w-0 [&_input]:rounded-lg [&_input]:border [&_input]:border-slate-200 [&_input]:bg-white [&_input]:px-3 [&_input]:text-xs [&_input]:text-slate-800 [&_input]:outline-none [&_input]:transition [&_input]:focus:border-forest-500 [&_input]:focus:ring-2 [&_input]:focus:ring-forest-100 [&_select]:h-10 [&_select]:min-w-0 [&_select]:rounded-lg [&_select]:border [&_select]:border-slate-200 [&_select]:bg-white [&_select]:px-3 [&_select]:text-xs [&_select]:text-slate-800 [&_select]:outline-none [&_select]:focus:border-forest-500 [&_select]:focus:ring-2 [&_select]:focus:ring-forest-100 [&_textarea]:rounded-lg [&_textarea]:border [&_textarea]:border-slate-200 [&_textarea]:px-3 [&_textarea]:py-2 [&_textarea]:text-xs">
           {notice && <div className={page === 'Devices' && deviceFocusId !== undefined ? 'fixed right-4 top-20 z-50 w-[min(36rem,calc(100vw-2rem))]' : ''}><NoticeBanner notice={notice} onDismiss={() => setNotice(null)} /></div>}
           {loading && <div className="flex items-center gap-2 text-xs text-slate-500"><span className="loading-skeleton" aria-hidden="true" /> Syncing workspace data...</div>}
-          {page === 'Overview' && <Overview user={user} dashboard={dashboard} onNavigate={setPage} />}
+          {page === 'Overview' && <Overview user={user} dashboard={dashboard} onNavigate={navigateToPage} />}
           {page === 'Monitoring' && <MonitoringPage onNavigate={(target, query, deviceId) => {
             setSearch(query ?? '')
             if (target === 'Devices') {
@@ -568,7 +572,7 @@ function App() {
               setDeviceInitialTab('Overview')
             }
             if (target === 'Anomalies') setDeviceFocusId(deviceId)
-            setPage(target)
+            navigateToPage(target)
           }} />}
           {page === 'Devices' && <>
             <div hidden={deviceFocusId !== undefined}>
@@ -585,7 +589,7 @@ function App() {
           </>}
           {page === 'Measurements' && <MeasurementsPage devices={devices} currentUserId={user.id} userRole={user.role} search={search} onAction={runAction} />}
           {page === 'Datasets' && <DatasetsPage datasets={datasets.filter((item) => `${item.name} ${item.device_name ?? ''} ${item.status}`.toLowerCase().includes(search.toLowerCase()))} canEdit={canAnalyze} onAction={runAction} />}
-          {page === 'Exploration' && <ExplorationPage datasets={datasets} onAction={runAction} onNavigate={(target, query) => { setSearch(query ?? ''); setPage(target) }} />}
+          {page === 'Exploration' && <ExplorationPage datasets={datasets} onAction={runAction} onNavigate={(target, query) => { setSearch(query ?? ''); navigateToPage(target) }} />}
           {page === 'Analysis' && <><AnalysisTools datasets={datasets} models={models} analyses={analyses} canEdit={canAnalyze} onAction={runAction} /><div className="hidden" aria-hidden="true"><AnalysisPage datasets={[]} models={[]} analyses={[]} canEdit={false} onAction={runAction} /></div></>}
           {page === 'Evaluation' && <EvaluationPage userRole={user.role} onAction={runAction} />}
           {page === 'Anomalies' && <AnomaliesPage
@@ -599,7 +603,7 @@ function App() {
                 if (deviceId !== undefined) setDeviceFocusId(deviceId)
                 setDeviceInitialTab('Analyses')
               } else if (deviceId !== undefined) setDeviceFocusId(deviceId)
-              setPage(target)
+              navigateToPage(target)
             }}
           />}
           {page === 'Maintenance' && <MaintenancePage devices={devices} orders={orders.filter((item) => `${item.title} ${item.device_name ?? ''} ${item.status} ${item.priority} ${item.assigned_name ?? ''}`.toLowerCase().includes(search.toLowerCase()))} user={user} onAction={runAction} />}
