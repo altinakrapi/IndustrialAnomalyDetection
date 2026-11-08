@@ -377,7 +377,21 @@ button:not(:disabled):active {
 }
 
 .dark .app-topbar {
-  background-color: rgba(26, 36, 28, 0.9);
+  background-color: #1a241c;
+}
+
+.dark .monitoring-breadcrumb {
+  color: #aab5a8;
+}
+
+.dark .monitoring-breadcrumb strong {
+  color: #e4e9e1;
+}
+
+.dark .monitoring-notice {
+  border-color: #7c6541;
+  background-color: #382e1d;
+  color: #f5f5f5;
 }
 
 .dark .login-card {

@@ -23,3 +23,5 @@ Open **Audit** for recorded actions. Open **Notifications** for archive, restore
 ## Permission summary
 
 The Administrator has the broadest access: users and roles, settings, device keys, notification archive and restore, audit, assignments, analyst workflows, and reports. See [PERMISSIONS.md](../PERMISSIONS.md).
+
+On **Monitoring**, all roles can review source-labelled device health, recent operational anomaly groups, and analysis summaries. Manage the NASA IMS dataset schedule in the Administrator-only section of **Settings**; live equipment readings are analysed as they arrive, and stopped-reporting checks run regardless. NASA IMS records are historical experiments, and simulated readings are synthetic test data, not physical telemetry.

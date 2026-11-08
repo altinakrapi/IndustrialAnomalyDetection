@@ -1,11 +1,26 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { request } from '../api'
 
-import type { AppSettings, NoticeState } from '../types/workflow'
+import type { AppSettings, MonitoringScheduleData, NoticeState } from '../types/workflow'
 
 import { buttonClass, panelClass, Field } from '../components/ui'
 
 import { PageTitle } from '../components/PageTitle'
+import { MonitoringScheduleSettings } from './MonitoringScheduleSettings'
+
+function scheduleRequestError(error: unknown): string {
+  const record = error !== null && typeof error === 'object'
+    ? error as { message?: unknown; status?: unknown }
+    : null
+  const message = error instanceof Error
+    ? error.message
+    : typeof record?.message === 'string'
+      ? record.message
+      : 'Unable to load scheduled analysis settings'
+  return typeof record?.status === 'number'
+    ? `Scheduled analysis settings could not be loaded (HTTP ${record.status}): ${message}`
+    : `Scheduled analysis settings could not be loaded: ${message}`
+}
 
 export function SettingsPage({
   isAdmin,
@@ -17,6 +32,11 @@ export function SettingsPage({
   onThemeChange: (theme: 'light' | 'dark') => void
 }) {
   const [settings, setSettings] = useState<AppSettings | null>(null)
+  const [schedule, setSchedule] = useState<MonitoringScheduleData | null>(null)
+  const [scheduleLoading, setScheduleLoading] = useState(true)
+  const [scheduleSaving, setScheduleSaving] = useState(false)
+  const [scheduleError, setScheduleError] = useState('')
+  const [scheduleMessage, setScheduleMessage] = useState('')
   const [notice, setNotice] = useState<NoticeState>(null)
   useEffect(() => {
     if (!isAdmin) return
@@ -24,6 +44,20 @@ export function SettingsPage({
       setNotice({ message: error instanceof Error ? error.message : 'Unable to load settings', error: true })
     })
   }, [isAdmin])
+  const loadSchedule = useCallback(async () => {
+    setScheduleLoading(true)
+    try {
+      setSchedule(await request<MonitoringScheduleData>('/monitoring'))
+      setScheduleError('')
+    } catch (error) {
+      setScheduleError(scheduleRequestError(error))
+    } finally {
+      setScheduleLoading(false)
+    }
+  }, [])
+  useEffect(() => {
+    if (isAdmin) void loadSchedule()
+  }, [isAdmin, loadSchedule])
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
@@ -47,6 +81,30 @@ export function SettingsPage({
       setNotice({ message: 'Settings saved' })
     } catch (error) {
       setNotice({ message: error instanceof Error ? error.message : 'Unable to save settings', error: true })
+    }
+  }
+  async function saveSchedule(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!schedule) return
+    setScheduleSaving(true)
+    setScheduleMessage('')
+    try {
+      const updated = await request<MonitoringScheduleData>('/monitoring', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          enabled: schedule.enabled,
+          interval_minutes: schedule.interval_minutes,
+          simulation_enabled: schedule.simulation_enabled,
+          simulation_batch_size: schedule.simulation_batch_size,
+        }),
+      })
+      setSchedule(updated)
+      setScheduleError('')
+      setScheduleMessage('Scheduled analysis settings saved')
+    } catch (error) {
+      setScheduleError(scheduleRequestError(error))
+    } finally {
+      setScheduleSaving(false)
     }
   }
   return (
@@ -95,6 +153,17 @@ export function SettingsPage({
           <Field label="Expected intervals before stale alert" name="stale_data_interval_multiplier" defaultValue={settings.stale_data_interval_multiplier} type="number" min={1} max={100} required />
           <button className={buttonClass} type="submit">Save settings</button>
         </form>}
+        <MonitoringScheduleSettings
+          isAdmin={isAdmin}
+          schedule={schedule}
+          loading={scheduleLoading}
+          saving={scheduleSaving}
+          error={scheduleError}
+          message={scheduleMessage}
+          onRetry={() => void loadSchedule()}
+          onChange={setSchedule}
+          onSubmit={(event) => void saveSchedule(event)}
+        />
         <p className="text-xs leading-5 text-slate-500">Device categories and locations are maintained in the equipment register. Database URL, signing secrets, and CORS origins remain deployment-managed and are not editable here.</p>
       </>}
     </>

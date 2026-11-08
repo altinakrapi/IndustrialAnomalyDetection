@@ -21,3 +21,5 @@ Ne faqen e pajisjes, zgjidh perdoruesin responsabel dhe teknikantin.
 Hap **Audit** per veprimet e regjistruara. Hap **Notifications** per arkivimin dhe rikthimin e njoftimeve.
 
 Administratorit i takojne te gjitha veprimet administrative dhe te Analistit te te Dhenave.
+
+Te **Monitoring**, te gjitha rolet mund te shohin gjendjen e pajisjeve me burimin e shenuar, grupet e fundit te anomalive operative dhe permbledhjet e analizave. Administratori menaxhon planifikimin e dataset-eve NASA IMS te seksioni vetem per administratoret ne **Settings**; matjet e pajisjeve analizohen kur mberrijne dhe kontrollet per ndalimin e raportimit kryhen pavaresisht planifikimit. Te dhenat NASA IMS jane eksperimente historike, ndersa matjet e simuluara jane te dhena sintetike testuese, jo telemetri fizike.

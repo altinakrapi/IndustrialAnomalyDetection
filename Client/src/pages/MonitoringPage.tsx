@@ -1,245 +1,242 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
-import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { useCallback, useEffect, useState } from 'react'
+import { ChevronDown, Info } from 'lucide-react'
 import { request } from '../api'
 
-import type { Action, MonitoringScheduleData, MonitoringDashboardData } from '../types/workflow'
-
-import { buttonClass, EmptyPanel, ErrorMessage } from '../components/ui'
+import type { Analysis, MonitoringDashboardData } from '../types/workflow'
+import type { AnomalyTimeBucket, GroupedAnomalyDevice, Page } from '../types'
 
 import { PageTitle } from '../components/PageTitle'
-import { AlertEvaluation } from '../components/AlertEvaluation'
 import { SourceTypeBadge } from '../components/SourceTypeControls'
+import { startVisiblePolling } from '../polling'
+import { formatBucketRange } from './anomalyGrouping'
+import { MonitoringPageState } from './MonitoringPageState'
+import {
+  buildRecentAnomalyGroups,
+  getDataDevices,
+  getDeviceCounts,
+  getDeviceStatus,
+  getDevicesNeedingAttention,
+  getDevicesWithoutData,
+  formatMonitoringRequestError,
+  getLastHourAnalysisSummary,
+  getMonitoringViewState,
+  getOverdueMeasurementDetails,
+  getRelevantAnalysisRuns,
+  getUniqueMeasurementWindowCount,
+  makeOperationalAnomalyParams,
+} from './monitoringView'
+
+const attentionRowClass = 'grid min-w-0 grid-cols-1 items-center gap-2 py-2.5 sm:grid-cols-[minmax(0,1fr)_minmax(8rem,auto)_auto]'
+const recentAnomalyRowClass = 'grid min-w-0 grid-cols-1 items-start gap-3 py-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,2.2fr)_minmax(0,1.2fr)_minmax(0,1.4fr)_auto]'
+
+type AnalysisHistoryResponse = {
+  items: Analysis[]
+  total: number
+  limit: number
+  offset: number
+}
+
+function formatDuration(seconds: number | null): string {
+  if (seconds === null) return 'Unavailable'
+  return seconds < 60 ? `${seconds.toFixed(1)} s` : `${(seconds / 60).toFixed(1)} min`
+}
 
 export function MonitoringPage({
-  userRole,
-  onAction,
+  onNavigate,
 }: {
-  userRole: string
-  onAction: Action
+  onNavigate: (target: Page, query?: string, deviceId?: number) => void
 }) {
-  const [schedule, setSchedule] = useState<MonitoringScheduleData | null>(null)
   const [dashboard, setDashboard] = useState<MonitoringDashboardData | null>(null)
+  const [openMeasurementWindows, setOpenMeasurementWindows] = useState<number | null>(null)
+  const [recentAnomalyGroups, setRecentAnomalyGroups] = useState<ReturnType<typeof buildRecentAnomalyGroups>>([])
+  const [lastHourAnalyses, setLastHourAnalyses] = useState<Analysis[]>([])
   const [error, setError] = useState('')
-  const [saving, setSaving] = useState(false)
-  const canRun = userRole === 'administrator' || userRole === 'data_analyst'
-  const isAdmin = userRole === 'administrator'
+  const [loading, setLoading] = useState(true)
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (signal?: AbortSignal) => {
+    setLoading(true)
     try {
-      const [scheduleData, dashboardData] = await Promise.all([
-        request<MonitoringScheduleData>('/monitoring'),
-        request<MonitoringDashboardData>('/monitoring/dashboard'),
+      const now = new Date()
+      const dayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+      const hourAgo = new Date(now.getTime() - 60 * 60 * 1000)
+      const operationalParams = makeOperationalAnomalyParams()
+      const recentParams = makeOperationalAnomalyParams(dayAgo)
+      const historyParams = new URLSearchParams({
+        start_date: hourAgo.toISOString(),
+        end_date: now.toISOString(),
+        sort_by: 'created_at',
+        sort_direction: 'desc',
+        limit: '500',
+        offset: '0',
+      })
+      const [dashboardData, anomalySummary, recentDeviceSummary, historyPage] = await Promise.all([
+        request<MonitoringDashboardData>('/monitoring/dashboard', { signal }),
+        request<{ measurement_total: number }>(`/anomalies/devices/grouped?${operationalParams}`, { signal }),
+        request<{ devices: GroupedAnomalyDevice[] }>(`/anomalies/devices/grouped?${recentParams}`, { signal }),
+        request<AnalysisHistoryResponse>(`/analyses/history?${historyParams}`, { signal }),
       ])
-      setSchedule(scheduleData)
+
+      const analyses = [...historyPage.items]
+      while (analyses.length < historyPage.total) {
+        historyParams.set('offset', String(analyses.length))
+        const nextPage = await request<AnalysisHistoryResponse>(`/analyses/history?${historyParams}`, { signal })
+        if (!nextPage.items.length) throw new Error('Analysis history changed while loading; retry to refresh it')
+        analyses.push(...nextPage.items)
+      }
+
+      const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+      const bucketResults: { deviceId: number; items: AnomalyTimeBucket[] }[] = []
+      for (let index = 0; index < recentDeviceSummary.devices.length; index += 10) {
+        const deviceBatch = recentDeviceSummary.devices.slice(index, index + 10)
+        const batchResults = await Promise.all(deviceBatch.map(async (device) => {
+          const params = makeOperationalAnomalyParams(dayAgo)
+          params.set('bucket_minutes', '10')
+          params.set('timezone', timeZone)
+          params.set('limit', '50')
+          const response = await request<{ items: AnomalyTimeBucket[] }>(
+            `/anomalies/devices/${device.device_id}/buckets?${params}`,
+            { signal },
+          )
+          return { deviceId: device.device_id, items: response.items }
+        }))
+        bucketResults.push(...batchResults)
+      }
+      const bucketsByDevice = Object.fromEntries(bucketResults.map((item) => [item.deviceId, item.items]))
+
       setDashboard(dashboardData)
+      setOpenMeasurementWindows(getUniqueMeasurementWindowCount(anomalySummary))
+      setRecentAnomalyGroups(buildRecentAnomalyGroups(recentDeviceSummary.devices, bucketsByDevice))
+      setLastHourAnalyses(analyses)
       setError('')
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Unable to load monitoring data')
+      if (!signal?.aborted) setError(formatMonitoringRequestError(caught))
+    } finally {
+      if (!signal?.aborted) setLoading(false)
     }
   }, [])
 
-  useEffect(() => {
-    const frame = window.requestAnimationFrame(() => void refresh())
-    const timer = window.setInterval(() => void refresh(), 15000)
-    return () => {
-      window.cancelAnimationFrame(frame)
-      window.clearInterval(timer)
-    }
-  }, [refresh])
+  useEffect(() => startVisiblePolling(refresh, 60000), [refresh])
 
-  async function saveSchedule(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    if (!schedule) return
-    setSaving(true)
-    try {
-      const updated = await request<MonitoringScheduleData>('/monitoring', {
-        method: 'PATCH',
-        body: JSON.stringify({
-          enabled: schedule.enabled,
-          interval_minutes: schedule.interval_minutes,
-          simulation_enabled: schedule.simulation_enabled,
-          simulation_batch_size: schedule.simulation_batch_size,
-        }),
-      })
-      setSchedule(updated)
-      setError('')
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Unable to save monitoring settings')
-    } finally {
-      setSaving(false)
-    }
+  const activeDevices = dashboard?.devices.filter((device) => device.status !== 'archived') ?? []
+  const dataDevices = getDataDevices(activeDevices)
+  const devicesWithoutData = getDevicesWithoutData(activeDevices)
+  const attentionDevices = getDevicesNeedingAttention(activeDevices)
+  const deviceCounts = getDeviceCounts(activeDevices)
+  const overdueDetails = getOverdueMeasurementDetails(activeDevices)
+  const overdueTooltip = overdueDetails.length
+    ? overdueDetails.map((item) => `${item.deviceName} · ${item.parameterName} · ${item.sourceType === 'manual' ? 'manual-entry reminder' : 'stale data; expected reading not received'}`).join('\n')
+    : 'No overdue measurements for active devices with data.'
+  const analysisSummary = getLastHourAnalysisSummary(lastHourAnalyses)
+  const relevantRuns = getRelevantAnalysisRuns(lastHourAnalyses)
+  const latestAnalysisAt = dashboard?.analysis_history[0]?.created_at
+  const viewState = getMonitoringViewState(loading, error, dashboard)
+  const panel = 'rounded-lg border border-slate-200 bg-white p-4 shadow-sm'
+  const statusLabel = (device: MonitoringDashboardData['devices'][number]) => {
+    const status = getDeviceStatus(device)
+    return status === 'not_reporting' ? 'Not reporting' : status === 'overdue' ? 'Overdue' : status === 'no_data' ? 'No data' : 'OK'
+  }
+  const statusTone = (device: MonitoringDashboardData['devices'][number]) => {
+    const status = getDeviceStatus(device)
+    return status === 'not_reporting' || status === 'overdue'
+      ? 'bg-rose-100 text-rose-800'
+      : status === 'no_data'
+        ? 'bg-slate-100 text-slate-600'
+        : 'bg-emerald-100 text-emerald-800'
   }
 
-  async function runNow() {
-    await onAction(
-      () => request('/monitoring/run', { method: 'POST' }),
-      'Automatic analysis queued',
-    )
-    await refresh()
-  }
+  return <>
+    <PageTitle
+      title="Automated monitoring"
+      description="Monitor device health and review results from all configured detectors across registered equipment and NASA IMS datasets."
+    />
 
-  const panel = 'rounded-xl border border-slate-200 bg-white p-5 shadow-sm'
-  const visibleDevices = dashboard?.devices ?? []
-  const visibleAnomalies = dashboard?.recent_anomalies ?? []
-  const visibleRuns = dashboard?.analysis_history ?? []
-  const healthColor = (health: string) => {
-    if (health === 'healthy') return 'bg-emerald-100 text-emerald-800'
-    if (health === 'attention' || health === 'analysis_failed' || health === 'stopped_reporting') return 'bg-rose-100 text-rose-800'
-    if (health === 'analyzing') return 'bg-amber-100 text-amber-800'
-    return 'bg-slate-100 text-slate-600'
-  }
-
-  return (
-    <>
-      <PageTitle
-        title="Automated monitoring"
-        description="Scheduled Isolation Forest and Z-score analysis, device health, anomaly history, and notification delivery."
-        action={canRun ? <button className={buttonClass} type="button" onClick={() => void runNow()}>Run analysis now</button> : undefined}
-      />
-      <section className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs leading-5 text-amber-900">
-        NASA IMS plots describe historical experiments. Reporting status for registered equipment uses server receipt times; simulated devices are synthetic test data, not physical telemetry.
+    <MonitoringPageState state={viewState} error={error} onRetry={() => void refresh()}>
+    {dashboard && <>
+      <section className={`${panel} grid gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7`} aria-label="Monitoring status">
+        <div><span className="block text-[10px] font-bold uppercase tracking-wide text-slate-500">Devices OK</span><strong className="mt-1 block text-xl text-slate-900">{deviceCounts.ok}</strong></div>
+        <div><span className="block text-[10px] font-bold uppercase tracking-wide text-slate-500">Needing attention</span><strong className="mt-1 block text-xl text-slate-900">{deviceCounts.attention}</strong></div>
+        <div><span className="block text-[10px] font-bold uppercase tracking-wide text-slate-500">Not reporting</span><strong className="mt-1 block text-xl text-slate-900">{deviceCounts.notReporting}</strong></div>
+        <div><span className="block text-[10px] font-bold uppercase tracking-wide text-slate-500">No data</span><strong className="mt-1 block text-xl text-slate-900">{deviceCounts.noData}</strong></div>
+        <div><span className="block text-[10px] font-bold uppercase tracking-wide text-slate-500">Open anomalies (unique measurements)</span><button className="mt-1 block text-left text-xl font-bold text-forest-700 hover:underline" type="button" onClick={() => onNavigate('Anomalies')}>{openMeasurementWindows?.toLocaleString() ?? '—'}</button></div>
+        <div><span className="block text-[10px] font-bold uppercase tracking-wide text-slate-500">Unread notifications</span><strong className="mt-1 block text-xl text-slate-900">{dashboard.notification_status.unread.toLocaleString()}</strong></div>
+        <div><span className="block text-[10px] font-bold uppercase tracking-wide text-slate-500">Last analysis</span><strong className="mt-1 block text-xs text-slate-800">{latestAnalysisAt ? new Date(latestAnalysisAt).toLocaleString() : 'No analysis yet'}</strong></div>
+        <div className="sm:col-span-3 lg:col-span-4 xl:col-span-7">
+          <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-slate-500" title={overdueTooltip}>Overdue measurements · {overdueDetails.length}<Info size={12} aria-hidden="true" /></span>
+        </div>
       </section>
-      {error && <ErrorMessage>{error}</ErrorMessage>}
-      {schedule && <section className={panel}>
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <h2 className="text-sm font-semibold text-slate-900">Scheduled analysis</h2>
-            <p className="mt-1 text-xs text-slate-500">New NASA IMS datasets are analyzed automatically with both supported algorithms.</p>
-          </div>
-          <span className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase ${schedule.enabled ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'}`}>
-            {schedule.enabled ? 'Enabled' : 'Paused'}
-          </span>
+
+      <section className={`${panel} space-y-3`}>
+        <div className="flex items-baseline justify-between gap-3"><h2 className="text-sm font-semibold text-slate-900">Needs attention</h2><span className="text-[10px] text-slate-500">{attentionDevices.length} devices</span></div>
+        {attentionDevices.length ? <ul className="divide-y divide-slate-100">
+          {attentionDevices.slice(0, 5).map((device) => <li className={attentionRowClass} key={device.id}>
+            <div className="min-w-0"><strong className="block truncate text-xs text-slate-800">{device.name}</strong><span className="block truncate text-[10px] text-slate-500">{device.device_code}</span><div className="mt-1"><SourceTypeBadge sourceType={device.source_type} /></div></div>
+            <span className="min-w-0 text-left text-[10px] tabular-nums text-slate-600">{device.measurement_schedule.some((item) => item.stale_data_status === 'stopped_reporting') ? 'Stopped reporting' : device.overdue_measurements ? `${device.overdue_measurements} overdue` : `${device.open_anomalies} open alerts`}</span>
+            <button className="justify-self-start whitespace-nowrap text-left text-xs font-semibold text-forest-700 hover:underline sm:justify-self-end sm:text-right" type="button" onClick={() => onNavigate('Devices', undefined, device.id)}>Open device</button>
+          </li>)}
+          {attentionDevices.length > 5 && <li className="pt-2 text-[10px] text-slate-500">Showing 5 of {attentionDevices.length} devices needing attention.</li>}
+        </ul> : devicesWithoutData.length
+          ? <p className="text-xs text-slate-500">No devices are overdue, stopped reporting, or have open alerts.</p>
+          : <p className="text-xs text-slate-500">All devices are reporting normally.</p>}
+      </section>
+
+      <section className={`${panel} space-y-3`}>
+        <div className="flex items-baseline justify-between gap-3"><h2 className="text-sm font-semibold text-slate-900">Device health</h2><span className="text-[10px] text-slate-500">{dataDevices.length} devices with readings</span></div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[780px] border-collapse text-left text-xs">
+            <thead className="bg-slate-50 text-[10px] font-bold uppercase tracking-wide text-slate-500"><tr><th className="px-3 py-2">Device</th><th className="px-3 py-2">Status</th><th className="px-3 py-2">Last reading</th><th className="px-3 py-2">Next expected</th><th className="px-3 py-2">Open alerts</th><th className="px-3 py-2">Source</th></tr></thead>
+            <tbody className="divide-y divide-slate-100">
+              {dataDevices.map((device) => {
+                const latest = device.latest_measurements[0]
+                const nextDue = device.measurement_schedule
+                  .filter((item) => item.enabled && item.next_due_at)
+                  .sort((left, right) => Date.parse(left.next_due_at ?? '') - Date.parse(right.next_due_at ?? ''))[0]?.next_due_at
+                return <tr key={device.id}>
+                  <td className="px-3 py-3"><button className="text-left font-semibold text-slate-800 hover:underline" type="button" onClick={() => onNavigate('Devices', undefined, device.id)}>{device.name}</button><span className="mt-0.5 block text-[10px] text-slate-500">{device.device_code}</span></td>
+                  <td className="px-3 py-3"><span className={`rounded-full px-2 py-1 text-[10px] font-bold ${statusTone(device)}`}>{statusLabel(device)}</span></td>
+                  <td className="px-3 py-3">{latest ? <><time>{new Date(latest.measured_at).toLocaleString()}</time><span className="ml-2 text-slate-500">{latest.parameter_name}: {latest.value} {latest.unit}</span></> : 'No recorded values'}</td>
+                  <td className="px-3 py-3">{nextDue ? new Date(nextDue).toLocaleString() : 'Not scheduled'}</td>
+                  <td className="px-3 py-3"><button className="font-semibold text-forest-700 hover:underline" type="button" onClick={() => onNavigate('Anomalies', undefined, device.id)}>{device.open_anomalies.toLocaleString()}</button></td>
+                  <td className="px-3 py-3"><SourceTypeBadge sourceType={device.source_type} /></td>
+                </tr>
+              })}
+              {devicesWithoutData.length > 0 && <tr><td className="px-3 py-3" colSpan={6}><details>
+                <summary className="flex cursor-pointer list-none items-center gap-2 text-xs font-semibold text-slate-600"><ChevronDown size={14} aria-hidden="true" />{devicesWithoutData.length} devices without data (show)</summary>
+                <ul className="mt-3 divide-y divide-slate-100">{devicesWithoutData.map((device) => <li className="flex items-center justify-between gap-3 py-2" key={device.id}><span><strong className="text-xs text-slate-700">{device.name}</strong><small className="ml-2 text-[10px] text-slate-500">{device.device_code}</small></span><SourceTypeBadge sourceType={device.source_type} /></li>)}</ul>
+              </details></td></tr>}
+              {activeDevices.length === 0 && <tr><td className="px-3 py-4 text-center text-xs text-slate-500" colSpan={6}>No registered devices.</td></tr>}
+            </tbody>
+          </table>
         </div>
-        {isAdmin && <form className="mt-4 grid gap-4 border-t border-slate-100 pt-4 sm:grid-cols-2 xl:grid-cols-4" onSubmit={(event) => void saveSchedule(event)}>
-          <label className="flex items-center gap-2 self-end text-xs font-medium text-slate-700">
-            <input type="checkbox" checked={schedule.enabled} onChange={(event) => setSchedule({ ...schedule, enabled: event.target.checked })} />
-            Enable scheduled analysis
-          </label>
-          <label className="grid gap-1.5 text-xs font-medium text-slate-600">Run interval (minutes; e.g. 60, 360, 1440)
-            <input type="number" min={1} max={1440} value={schedule.interval_minutes} onChange={(event) => setSchedule({ ...schedule, interval_minutes: Number(event.target.value) })} required />
-          </label>
-          <label className="flex items-center gap-2 self-end text-xs font-medium text-slate-700">
-            <input type="checkbox" checked={schedule.simulation_enabled} onChange={(event) => setSchedule({ ...schedule, simulation_enabled: event.target.checked })} />
-            Simulate historical readings over time
-          </label>
-          <label>Simulation batch size (rows)
-            <input type="number" min={2} max={10000} value={schedule.simulation_batch_size} disabled={!schedule.simulation_enabled} onChange={(event) => setSchedule({ ...schedule, simulation_batch_size: Number(event.target.value) })} required />
-          </label>
-          <div className="flex flex-wrap items-center gap-3 sm:col-span-2 xl:col-span-4">
-            <button className={buttonClass} type="submit" disabled={saving}>{saving ? 'Saving...' : 'Save schedule'}</button>
-            <span className="text-[11px] text-slate-500">
-              {schedule.simulation_enabled
-                ? `Simulation replays ${schedule.simulation_batch_size} stored rows per interval; it is not a live sensor connection.`
-                : 'Historical data is analyzed automatically. Later cycles process changed dataset snapshots or retry failures; unchanged data is skipped.'}
-            </span>
-          </div>
-        </form>}
-        {!isAdmin && <p className="mt-4 text-xs text-slate-500">
-          Runs every {schedule.interval_minutes} minutes. Simulation is {schedule.simulation_enabled ? 'enabled for historical replay' : 'disabled'}.
-        </p>}
-        <div className="mt-4 grid gap-3 border-t border-slate-100 pt-4 text-xs sm:grid-cols-2 xl:grid-cols-4">
-          <div><span className="block text-[10px] uppercase text-slate-400">Execution status</span><strong className={`mt-1 inline-block rounded-full px-2 py-1 capitalize ${schedule.execution_status === 'failed' ? 'bg-rose-100 text-rose-800' : schedule.execution_status === 'running' ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`}>{schedule.execution_status}</strong></div>
-          <div><span className="block text-[10px] uppercase text-slate-400">Next run</span><strong className="mt-1 block text-slate-700">{schedule.enabled && schedule.next_run_at ? new Date(schedule.next_run_at).toLocaleString() : 'Not scheduled'}</strong></div>
-          <div><span className="block text-[10px] uppercase text-slate-400">Last started</span><strong className="mt-1 block text-slate-700">{schedule.last_started_at ? new Date(schedule.last_started_at).toLocaleString() : 'No runs yet'}</strong></div>
-          <div><span className="block text-[10px] uppercase text-slate-400">Last completed</span><strong className="mt-1 block text-slate-700">{schedule.last_completed_at ? new Date(schedule.last_completed_at).toLocaleString() : 'No runs yet'}</strong></div>
-        </div>
-        {schedule.last_error && <p className="mt-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800" role="alert">Last execution issue: {schedule.last_error}</p>}
-      </section>}
-      {dashboard && <>
-        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          <div className={panel}><span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Devices monitored</span><strong className="mt-2 block text-2xl text-slate-900">{visibleDevices.length}</strong></div>
-          <div className={panel}><span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Open anomalies</span><strong className="mt-2 block text-2xl text-slate-900">{visibleDevices.reduce((total, device) => total + device.open_anomalies, 0) + visibleAnomalies.filter((anomaly) => anomaly.source_type === 'dataset').length}</strong></div>
-          <div className={panel}><span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Overdue measurements</span><strong className="mt-2 block text-2xl text-slate-900">{visibleDevices.reduce((total, device) => total + device.overdue_measurements, 0)}</strong></div>
-          <div className={panel}><span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Your anomaly alerts</span><strong className="mt-2 block text-2xl text-slate-900">{dashboard.notification_status.anomaly_notifications}</strong><span className="mt-1 block text-[10px] text-slate-500">{dashboard.notification_status.unread} unread in-app notifications</span></div>
-          <div className={panel}><span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Failed analysis runs</span><strong className="mt-2 block text-2xl text-slate-900">{visibleRuns.filter((run) => run.status === 'failed').length}</strong></div>
-          <div className={panel}><span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Pending maintenance tasks</span><strong className="mt-2 block text-2xl text-slate-900">{dashboard.pending_maintenance_tasks}</strong></div>
-        </section>
-        <section className={`${panel} grid gap-4 sm:grid-cols-2`}>
-          {([
-            ['Registered equipment', dashboard.severity_distribution.equipment],
-            ['NASA dataset experiments', dashboard.severity_distribution.dataset_experiments],
-          ] as const).map(([label, counts]) => <div key={label}>
-            <h2 className="text-xs font-semibold text-slate-800">{label} · detections by severity</h2>
-            <div className="mt-3 grid grid-cols-4 gap-2">{['critical', 'high', 'medium', 'low'].map((severity) => <div className="rounded-lg bg-slate-50 p-2" key={severity}><span className="block text-[9px] uppercase text-slate-400">{severity}</span><strong className="mt-1 block text-sm text-slate-800">{counts[severity] ?? 0}</strong></div>)}</div>
-          </div>)}
-        </section>
-        <section className={panel}>
-          <h2 className="mb-4 text-sm font-semibold text-slate-900">Device health</h2>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[900px] border-collapse text-left text-xs">
-              <thead className="bg-slate-50 text-[10px] font-bold uppercase tracking-wide text-slate-400"><tr><th className="px-3 py-2">Device</th><th className="px-3 py-2">Health</th><th className="px-3 py-2">Latest measurement</th><th className="px-3 py-2">Next measurement due</th><th className="px-3 py-2">Overdue</th><th className="px-3 py-2">Open anomalies</th><th className="px-3 py-2">Latest analysis</th><th className="px-3 py-2">Data source</th></tr></thead>
-              <tbody className="divide-y divide-slate-100">
-                {visibleDevices.map((device) => <tr key={device.id}>
-                  <td className="px-3 py-3"><strong className="block text-slate-800">{device.name}</strong><span className="text-[10px] text-slate-400">{device.device_code}</span><div className="mt-1"><SourceTypeBadge sourceType={device.source_type} /></div></td>
-                  <td className="px-3 py-3"><span className={`rounded-full px-2 py-1 text-[10px] font-bold capitalize ${healthColor(device.health)}`}>{device.health.replaceAll('_', ' ')}</span></td>
-                  <td className="px-3 py-3">{device.latest_measurements[0] ? <>{device.latest_measurements[0].parameter_name}: {device.latest_measurements[0].value} {device.latest_measurements[0].unit} · {new Date(device.latest_measurements[0].measured_at).toLocaleString()} <SourceTypeBadge sourceType={device.latest_measurements[0].source_type} /></> : 'No recorded values'}</td>
-                  <td className="px-3 py-3">{device.measurement_schedule.length ? device.measurement_schedule.map((schedule) => <div className="mb-2" key={schedule.parameter_id}><span className="font-medium">{schedule.parameter_name}</span> · last received {schedule.last_reading_received_at ? new Date(schedule.last_reading_received_at).toLocaleString() : 'never'} · due {schedule.enabled && schedule.next_due_at ? new Date(schedule.next_due_at).toLocaleString() : 'disabled'} · {schedule.stale_data_status === 'stopped_reporting' ? <strong className="text-rose-700">stopped reporting</strong> : schedule.stale_data_status === 'reporting_resumed' ? 'reporting resumed' : schedule.status.replaceAll('_', ' ')}<AlertEvaluation alert_rules={schedule.stale_data_episode?.alert_rules ?? schedule.alert_rules} alert_priority={schedule.stale_data_episode?.priority ?? schedule.alert_priority} history_state={schedule.history_state} history_size={schedule.history_size} history_required={schedule.history_required} className="mt-1" /></div>) : 'No parameters configured'}</td>
-                  <td className="px-3 py-3">{device.overdue_measurements}</td>
-                  <td className="px-3 py-3">{device.open_anomalies}</td>
-                  <td className="px-3 py-3">{device.last_analysis ? `${device.last_analysis.status} · ${new Date(device.last_analysis.created_at).toLocaleString()}` : 'Not analyzed'}</td>
-                  <td className="px-3 py-3 text-slate-500">{device.data_source}</td>
-                </tr>)}
-              </tbody>
-            </table>
-          </div>
-          {visibleDevices.length === 0 && <EmptyPanel title="No matching equipment" body="No registered equipment matches this source selection. Historical dataset analysis remains separate." />}
-        </section>
-        {visibleDevices.some((device) => (device.measurement_trend ?? device.vibration_trend)?.points.length) && <section className={panel}>
-          <h2 className="text-sm font-semibold text-slate-900">Measurement trends</h2>
-          <p className="mt-1 text-[10px] text-slate-500">Registered equipment uses manually recorded values; NASA IMS charts show historical experiment observations. Neither is a live sensor feed.</p>
-          <div className="mt-4 grid gap-4 lg:grid-cols-2">
-            {visibleDevices.filter((device) => (device.measurement_trend ?? device.vibration_trend)?.points.length).map((device) => {
-              const trend = device.measurement_trend ?? device.vibration_trend
-              return <article className="rounded-lg border border-slate-100 p-3" key={device.id}>
-              <h3 className="text-xs font-semibold text-slate-800">{device.name} · {trend?.feature}{device.measurement_trend?.unit ? ` (${device.measurement_trend.unit})` : ''}</h3>
-              <p className="text-[10px] text-slate-500">{trend?.data_source}</p>
-              <div className="mt-3 h-52">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={trend?.points}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="label" tick={{ fontSize: 8 }} minTickGap={24} />
-                    <YAxis tick={{ fontSize: 9 }} />
-                    <Tooltip labelFormatter={(label) => `Measurement: ${label}`} />
-                    <Line dataKey="value" name={trend?.feature} dot={false} stroke="#466b4c" />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-            </article>})}
-          </div>
-        </section>}
-        <section className={`${panel} grid gap-6 xl:grid-cols-2`}>
-          <div>
-            <h2 className="mb-3 text-sm font-semibold text-slate-900">Recent anomalies</h2>
-            <div className="divide-y divide-slate-100">
-              {visibleAnomalies.map((anomaly) => <article className="py-3" key={anomaly.id}>
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <strong className="text-xs text-slate-800">{anomaly.device_name ?? anomaly.dataset_name ?? 'Detection'} · {anomaly.parameter_name ?? (anomaly.source_type === 'dataset' ? 'Historical dataset experiment' : 'Equipment anomaly')}</strong>
-                  <span className={`rounded-full px-2 py-1 text-[10px] font-bold capitalize ${anomaly.severity === 'high' || anomaly.severity === 'critical' ? 'bg-rose-100 text-rose-800' : 'bg-amber-100 text-amber-800'}`}>{anomaly.severity} severity</span>
-                </div>
-                <p className="mt-1 text-[10px] text-slate-500">{anomaly.source_type === 'dataset' ? 'Historical dataset experiment' : 'Registered equipment'} | {anomaly.anomaly_type.replaceAll('_', ' ')} · {anomaly.status.replaceAll('_', ' ')} · detected {new Date(anomaly.detected_at).toLocaleString()}</p>
-                <SourceTypeBadge sourceType={anomaly.measurement_source_type ?? (anomaly.source_type === 'dataset' ? 'dataset' : 'manual')} />
-                <AlertEvaluation alert_rules={anomaly.alert_rules} alert_priority={anomaly.alert_priority} history_state={anomaly.history_state} history_size={anomaly.history_size} history_required={anomaly.history_required} />
-                {anomaly.measurement_time && <p className="mt-1 text-[10px] text-slate-500">Source measurement: {new Date(anomaly.measurement_time).toLocaleString()}</p>}
-                <div className="mt-2 flex flex-wrap gap-1.5">{Object.entries(anomaly.feature_values).slice(0, 5).map(([feature, value]) => <span className="rounded bg-slate-50 px-2 py-1 font-mono text-[9px] text-slate-600" key={feature}>{feature}: {typeof value === 'number' ? value.toPrecision(4) : String(value ?? 'n/a')}</span>)}</div>
-              </article>)}
-              {visibleAnomalies.length === 0 && <p className="py-4 text-xs text-slate-500">No measurements match this source filter in the recent analysis window.</p>}
+      </section>
+
+      <section className={`${panel} space-y-3`}>
+        <div className="flex items-baseline justify-between gap-3"><h2 className="text-sm font-semibold text-slate-900">Recent anomalies</h2><span className="text-[10px] text-slate-500">Last 24 hours · 10-minute buckets</span></div>
+        {recentAnomalyGroups.length ? <div className="divide-y divide-slate-100">
+          {recentAnomalyGroups.map((group) => <article className={recentAnomalyRowClass} key={`${group.deviceId}-${group.bucket.parameter_id}-${group.bucket.bucket_start}`}>
+            <div className="min-w-0">
+              <strong className="block truncate text-xs text-slate-800">{group.deviceName} · {group.bucket.parameter_name}</strong><span className="block truncate text-[10px] text-slate-500">{group.deviceCode}</span>
+              <div className="mt-1 flex flex-wrap items-center gap-1">{group.sourceTypes.map((source) => <SourceTypeBadge sourceType={source} key={source} />)}</div>
+              <time className="mt-1 block text-[10px] text-slate-500">{formatBucketRange(group.bucket.bucket_start, 10, Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC')}</time>
             </div>
-          </div>
-          <div>
-            <h2 className="mb-3 text-sm font-semibold text-slate-900">Analysis history</h2>
-            <div className="divide-y divide-slate-100">
-              {visibleRuns.map((run) => <article className="py-3" key={run.id}>
-                <div className="flex flex-wrap items-center justify-between gap-2"><strong className="text-xs text-slate-800">#{run.id} · {run.device_name ?? 'Device'} · {run.model_name ?? 'Model'}</strong><span className={`rounded-full px-2 py-1 text-[10px] font-bold capitalize ${run.status === 'completed' ? 'bg-emerald-100 text-emerald-800' : run.status === 'failed' ? 'bg-rose-100 text-rose-800' : 'bg-amber-100 text-amber-800'}`}>{run.status}</span></div>
-                <p className="mt-1 text-[10px] text-slate-500">{run.execution_type === 'simulated' ? 'Simulated historical replay' : run.execution_type === 'scheduled' ? 'Automatic historical analysis' : run.execution_type === 'measurement' ? 'Equipment measurement analysis' : 'User-requested analysis'} · {run.dataset_name ?? (run.source_type === 'equipment' ? 'Registered equipment' : 'Dataset')} · {new Date(run.created_at).toLocaleString()} <SourceTypeBadge sourceType={run.measurement_source_type ?? (run.source_type === 'dataset' ? 'dataset' : null)} /></p>
-                {run.source_start_row != null && <p className="mt-1 text-[10px] text-slate-500">Replay rows {run.source_start_row.toLocaleString()}–{run.source_end_row?.toLocaleString()}</p>}
-                <p className="mt-1 text-[10px] text-slate-600">{run.total_records.toLocaleString()} measurements · {run.anomalies_found.toLocaleString()} anomalies</p>
-                {run.error_message && <p className="mt-1 text-[10px] text-rose-700">{run.error_message}</p>}
-              </article>)}
-              {dashboard.analysis_history.length === 0 && <p className="py-4 text-xs text-slate-500">Automatic analysis will appear here after dataset import.</p>}
-            </div>
-          </div>
-        </section>
-      </>}
-    </>
-  )
+            <div className="min-w-0 text-left text-xs tabular-nums text-slate-700"><button className="font-semibold text-forest-700 hover:underline" type="button" onClick={() => onNavigate('Anomalies', undefined, group.deviceId)}>{group.bucket.anomaly_count.toLocaleString()} detections</button><span className="mt-1 block text-[10px]">{group.bucket.minimum_value ?? '—'}–{group.bucket.maximum_value ?? '—'} {group.bucket.unit ?? ''}</span></div>
+            <div className="min-w-0 text-left text-xs text-slate-700"><span className="block text-[9px] font-bold uppercase text-slate-500">Highest severity</span><strong className="capitalize">{group.bucket.highest_severity}</strong><span className="mt-1 block break-words text-[10px] text-slate-500">{group.bucket.detectors.join(', ') || 'No detector detail'}</span></div>
+            <button className="justify-self-start whitespace-nowrap text-left text-xs font-semibold text-forest-700 hover:underline sm:justify-self-end sm:text-right" type="button" onClick={() => onNavigate('Anomalies', undefined, group.deviceId)}>View all in Anomalies</button>
+          </article>)}
+        </div> : <p className="text-xs text-slate-500">No operational anomalies were detected in the last 24 hours.</p>}
+      </section>
+
+      <section className={`${panel} space-y-3`}>
+        <div className="flex flex-wrap items-baseline justify-between gap-3"><h2 className="text-sm font-semibold text-slate-900">Analysis history</h2><button className="text-xs font-semibold text-forest-700 hover:underline" type="button" onClick={() => onNavigate('Analysis')}>Open Analysis</button></div>
+        <p className="text-xs text-slate-600">Last hour: {analysisSummary.total} analyses · {analysisSummary.failed} failed · average recorded duration {formatDuration(analysisSummary.averageDurationSeconds)} across {analysisSummary.durationCount} timed runs.</p>
+        {relevantRuns.length ? <div className="divide-y divide-slate-100">
+          {relevantRuns.map((run) => <article className="flex flex-wrap items-start justify-between gap-3 py-2.5" key={run.id}>
+            <div><strong className="text-xs text-slate-800">{run.dataset_name ?? run.device_name ?? 'Analysis run'} · {(run.algorithm ?? run.model_name ?? 'detector').replaceAll('_', ' ')}</strong><span className="ml-2 rounded-full bg-slate-100 px-2 py-1 text-[10px] font-semibold capitalize text-slate-700">{run.status}</span><p className="mt-1 text-[10px] text-slate-500">Source: {run.source_type.replaceAll('_', ' ')} · {run.execution_type === 'scheduled' ? 'Scheduled cycle' : 'Failed analysis'} · {new Date(run.created_at).toLocaleString()} · {formatDuration(run.duration_seconds ?? null)}</p>{run.error_message && <p className="mt-1 text-[10px] text-rose-700">{run.error_message}</p>}</div>
+          </article>)}
+        </div> : <p className="text-xs text-slate-500">No failed analyses or scheduled cycles in the last hour.</p>}
+      </section>
+
+      <p className="monitoring-notice flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] leading-5 text-amber-900"><Info className="mt-0.5 shrink-0" size={14} aria-hidden="true" />NASA IMS data are historical experiments, not live equipment readings. Simulated readings are synthetic test data, not physical telemetry.</p>
+    </>}
+    </MonitoringPageState>
+  </>
 }

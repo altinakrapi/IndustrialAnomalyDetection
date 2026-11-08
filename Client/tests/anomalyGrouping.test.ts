@@ -2,8 +2,11 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
 import type { Anomaly } from '../src/types.ts'
+import type { AnomalyTimeBucket } from '../src/types.ts'
 import {
   groupAnomaliesByParameter,
+  groupBucketsByParameter,
+  formatBucketRange,
   groupedAnomalyRequestError,
   groupedDeviceCountTotal,
   reconcileGroupedDeviceCounts,
@@ -67,7 +70,57 @@ function anomaly(
   }
 }
 
+function bucket(
+  parameterId: number,
+  parameterName: string,
+  bucketStart: string,
+  anomalyCount = 1,
+): AnomalyTimeBucket {
+  return {
+    bucket_start: bucketStart,
+    parameter_id: parameterId,
+    parameter_name: parameterName,
+    anomaly_count: anomalyCount,
+    minimum_value: 1,
+    maximum_value: 3,
+    unit: 'mm/s',
+    highest_severity: 'medium',
+    detectors: ['z_score'],
+    not_reviewed_count: 0,
+    review_status: 'new',
+  }
+}
+
 describe('device anomaly grouping helpers', () => {
+  it('groups time buckets by parameter and keeps newest buckets first', () => {
+    const groups = groupBucketsByParameter([
+      bucket(10, 'Vibration', '2026-03-01T12:01:00Z', 2),
+      bucket(20, 'Temperature', '2026-03-01T12:02:00Z'),
+      bucket(10, 'Vibration', '2026-03-01T12:00:00Z'),
+    ])
+
+    assert.deepEqual(groups.map((group) => group.parameterName), ['Temperature', 'Vibration'])
+    assert.deepEqual(
+      groups[1].buckets.map((item) => item.bucket_start),
+      ['2026-03-01T12:01:00Z', '2026-03-01T12:00:00Z'],
+    )
+    assert.equal(
+      groups.flatMap((group) => group.buckets).reduce((total, item) => total + item.anomaly_count, 0),
+      4,
+    )
+  })
+
+  it('formats the full bucket range in the display timezone', () => {
+    assert.equal(
+      formatBucketRange('2026-11-07T21:20:00Z', 10, 'Europe/Paris'),
+      '07 Nov 2026, 22:20 – 22:29',
+    )
+    assert.equal(
+      formatBucketRange('2026-11-01T06:00:00Z', 30, 'America/New_York'),
+      '01 Nov 2026, 01:00 – 01:29',
+    )
+  })
+
   it('groups by parameter newest detection and sorts anomalies newest first', () => {
     const groups = groupAnomaliesByParameter([
       anomaly(1, 10, 'Vibration', '2026-03-01T12:00:00Z'),

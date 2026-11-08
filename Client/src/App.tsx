@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import {
   Activity,
   AlertTriangle,
@@ -19,7 +19,7 @@ import {
   UserRound,
   Wrench,
 } from 'lucide-react'
-import { getToken, request, requestAllPages, setToken } from './api'
+import { ApiError, getToken, request, requestAllPages, setToken } from './api'
 import { AnalysisTools, AuditPage, DeviceDetailPanel, ExplorationPage, MonitoringPage, NotificationsPage, ProfilePage, ReportsPage, SettingsPage } from './pages/WorkflowPages'
 
 import type { User, Device, Dataset, ModelConfig, Analysis, Maintenance, DashboardData, Page, Notice, Theme, NotificationItem } from './types'
@@ -37,6 +37,7 @@ import { EvaluationPage } from './pages/EvaluationPage'
 import { BrandLogo } from './components/BrandLogo'
 import { NoticeBanner } from './components/NoticeBanner'
 import { ModelDisclaimer } from './components/ModelDisclaimer'
+import { startVisiblePolling } from './polling'
 
 const WELCOME_BACK_LABEL = 'Welcome back'
 
@@ -87,6 +88,8 @@ function App() {
   const [notificationError, setNotificationError] = useState('')
   const [notificationsOpen, setNotificationsOpen] = useState(false)
   const [signOutConfirmationOpen, setSignOutConfirmationOpen] = useState(false)
+  const notificationsRefreshInFlight = useRef(false)
+  const anomalyCountRefreshInFlight = useRef(false)
   const savedTheme = user ? localStorage.getItem(`industrial-anomaly-theme:${user.id}`) : null
   const theme: Theme = savedTheme === 'dark' ? 'dark' : 'light'
 
@@ -100,41 +103,56 @@ function App() {
     setThemeRevision((revision) => revision + 1)
   }
 
-  const refreshNotifications = useCallback(async () => {
+  const refreshNotifications = useCallback(async (signal?: AbortSignal) => {
+    if (notificationsRefreshInFlight.current) return
+    notificationsRefreshInFlight.current = true
     if (!user) {
       setUnreadNotifications(0)
       setNotifications([])
       setNotificationError('')
+      notificationsRefreshInFlight.current = false
       return
     }
     try {
       const [count, items] = await Promise.all([
-        request<{ unread_count: number }>('/notifications/unread-count'),
-        request<NotificationItem[]>('/notifications?limit=5'),
+        request<{ unread_count: number }>('/notifications/unread-count', { signal }),
+        request<NotificationItem[]>('/notifications?limit=5', { signal }),
       ])
       setUnreadNotifications(count.unread_count)
       setNotifications(items)
       setNotificationError('')
     } catch (error) {
-      setNotificationError(error instanceof Error ? error.message : 'Unable to load notifications')
+      if (!signal?.aborted) {
+        setNotificationError(error instanceof Error ? error.message : 'Unable to load notifications')
+      }
+    } finally {
+      notificationsRefreshInFlight.current = false
     }
   }, [user])
 
-  const refreshEquipmentAnomalyCount = useCallback(async () => {
+  const refreshEquipmentAnomalyCount = useCallback(async (signal?: AbortSignal) => {
+    if (anomalyCountRefreshInFlight.current) return
+    anomalyCountRefreshInFlight.current = true
     if (!user) {
       setUnreviewedEquipmentAnomalies(0)
+      anomalyCountRefreshInFlight.current = false
       return
     }
     try {
       const summary = await request<{ pending_reviews: number }>(
         '/anomalies/summary?source_type=equipment',
+        { signal },
       )
       setUnreviewedEquipmentAnomalies(summary.pending_reviews)
     } catch (error) {
-      setNotice({
-        kind: 'error',
-        text: error instanceof Error ? error.message : 'Unable to refresh equipment anomaly count',
-      })
+      if (!signal?.aborted) {
+        setNotice({
+          kind: 'error',
+          text: error instanceof Error ? error.message : 'Unable to refresh equipment anomaly count',
+        })
+      }
+    } finally {
+      anomalyCountRefreshInFlight.current = false
     }
   }, [user])
 
@@ -167,26 +185,19 @@ function App() {
   }, [page, user])
 
   useEffect(() => {
-    const frame = window.requestAnimationFrame(() => void refreshNotifications())
-    return () => window.cancelAnimationFrame(frame)
-  }, [refreshNotifications])
-
-  useEffect(() => {
-    if (!user) return
-    const timer = window.setInterval(() => void refreshNotifications(), 15000)
-    return () => window.clearInterval(timer)
+    if (!user) {
+      const frame = window.requestAnimationFrame(() => void refreshNotifications())
+      return () => window.cancelAnimationFrame(frame)
+    }
+    return startVisiblePolling(refreshNotifications, 15000)
   }, [refreshNotifications, user])
 
   useEffect(() => {
-    const frame = window.requestAnimationFrame(() => void refreshEquipmentAnomalyCount())
     if (!user) {
+      const frame = window.requestAnimationFrame(() => void refreshEquipmentAnomalyCount())
       return () => window.cancelAnimationFrame(frame)
     }
-    const timer = window.setInterval(() => void refreshEquipmentAnomalyCount(), 15000)
-    return () => {
-      window.cancelAnimationFrame(frame)
-      window.clearInterval(timer)
-    }
+    return startVisiblePolling(refreshEquipmentAnomalyCount, 15000)
   }, [refreshEquipmentAnomalyCount, user])
 
   useEffect(() => {
@@ -195,9 +206,48 @@ function App() {
       return
     }
     if (!getToken()) return
-    request<User>('/auth/me')
-      .then(setUser)
-      .catch(() => setToken(null))
+    let active = true
+    const restoreSession = async () => {
+      for (let attempt = 1; attempt <= 3; attempt += 1) {
+        try {
+          const restoredUser = await request<User>('/auth/me')
+          if (active) {
+            setUser(restoredUser)
+            setNotice(null)
+          }
+          return
+        } catch (error) {
+          if (!active) return
+          if (error instanceof ApiError && error.status === 401) {
+            setToken(null)
+            setUser(null)
+            setNotice({ kind: 'error', text: 'Your session expired. Please sign in again.' })
+            return
+          }
+          const retryable = !(error instanceof ApiError) || error.status >= 500
+          if (!retryable) {
+            setNotice({
+              kind: 'error',
+              text: error instanceof Error ? error.message : 'Unable to restore the saved session.',
+            })
+            return
+          }
+          if (attempt < 3) {
+            setNotice({ kind: 'error', text: 'Server unavailable, retrying session check...' })
+            await new Promise((resolve) => window.setTimeout(resolve, 1500))
+          } else {
+            setNotice({
+              kind: 'error',
+              text: 'Server unavailable after 3 attempts. Your saved session was kept; refresh to retry.',
+            })
+          }
+        }
+      }
+    }
+    void restoreSession()
+    return () => {
+      active = false
+    }
   }, [resetTokenFromUrl])
 
   useEffect(() => {
@@ -221,6 +271,15 @@ function App() {
     window.addEventListener('session-expired', handleSessionExpired)
     return () => window.removeEventListener('session-expired', handleSessionExpired)
   }, [])
+
+  useEffect(() => {
+    if (!signOutConfirmationOpen) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setSignOutConfirmationOpen(false)
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [signOutConfirmationOpen])
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => void loadPage())
@@ -452,14 +511,14 @@ function App() {
           <div className="flex items-center gap-3 rounded-xl border-t border-slate-100 px-2 pt-4">
             <div className="grid size-9 shrink-0 place-items-center rounded-full bg-forest-100 text-xs font-bold text-forest-700">{user.full_name.split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase()}</div>
             <div className="grid min-w-0 flex-1 [&_strong]:truncate [&_strong]:text-xs [&_small]:text-[11px] [&_small]:text-slate-500"><strong>{user.full_name}</strong><small>{roleLabel[user.role] ?? user.role}</small></div>
-            <button className="grid size-9 place-items-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-900 logout-button" aria-label="Sign out" title="Sign out" onClick={logout}><LogOut size={17} /></button>
+            <button className="grid size-9 place-items-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-900 logout-button" aria-label="Sign out" title="Sign out" onClick={() => setSignOutConfirmationOpen(true)}><LogOut size={17} /></button>
           </div>
         </div>
       </aside>
 
       <main className="flex min-h-screen min-w-0 flex-col">
         <header className="app-topbar sticky top-0 z-10 flex min-h-16 items-center justify-between gap-4 border-b border-slate-200 px-5 sm:px-8">
-          <div className="flex items-center gap-2 text-xs text-slate-400 [&>strong]:font-semibold [&>strong]:text-slate-800"><span>Workspace</span><span>/</span><strong>{page}</strong></div>
+          <div className="monitoring-breadcrumb flex items-center gap-2 text-xs text-slate-600 [&>strong]:font-semibold [&>strong]:text-slate-800"><span>Workspace</span><span>/</span><strong>{page}</strong></div>
           <div className="flex items-center gap-3">
             <span className="hidden text-xs text-slate-500 sm:block">{new Date().toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</span>
             {['Devices', 'Measurements', 'Datasets', 'Analysis', 'Anomalies', 'Maintenance'].includes(page) && <label className="flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-slate-400 [&>input]:w-32 [&>input]:border-0 [&>input]:bg-transparent [&>input]:text-xs [&>input]:text-slate-700 [&>input]:outline-none sm:[&>input]:w-44"><Search size={16} /><input aria-label={`Search ${page.toLowerCase()}`} placeholder={`Search ${page.toLowerCase()}...`} value={search} onChange={(event) => setSearch(event.target.value)} /></label>}
@@ -500,7 +559,11 @@ function App() {
           {notice && <NoticeBanner notice={notice} onDismiss={() => setNotice(null)} />}
           {loading && <div className="flex items-center gap-2 text-xs text-slate-500"><span className="loading-skeleton" aria-hidden="true" /> Syncing workspace data...</div>}
           {page === 'Overview' && <Overview user={user} dashboard={dashboard} onNavigate={setPage} />}
-          {page === 'Monitoring' && <MonitoringPage userRole={user.role} onAction={runAction} />}
+          {page === 'Monitoring' && <MonitoringPage onNavigate={(target, query, deviceId) => {
+            setSearch(query ?? '')
+            if (target === 'Devices' || target === 'Anomalies') setDeviceFocusId(deviceId)
+            setPage(target)
+          }} />}
           {page === 'Devices' && <><DeviceDetailPanel devices={displayedDevices} canEdit={user.role === 'administrator'} canRecord={['administrator', 'data_analyst', 'maintenance_technician'].includes(user.role)} isAdministrator={user.role === 'administrator'} currentUserId={user.id} initialDeviceId={deviceFocusId} onAction={runAction} /><DevicesPage devices={displayedDevices} canEdit={canAnalyze} isAdministrator={user.role === 'administrator'} onAction={runAction} /></>}
           {page === 'Measurements' && <MeasurementsPage devices={devices} currentUserId={user.id} userRole={user.role} search={search} onAction={runAction} />}
           {page === 'Datasets' && <DatasetsPage datasets={datasets.filter((item) => `${item.name} ${item.device_name ?? ''} ${item.status}`.toLowerCase().includes(search.toLowerCase()))} canEdit={canAnalyze} onAction={runAction} />}
@@ -510,6 +573,7 @@ function App() {
           {page === 'Anomalies' && <AnomaliesPage
             devices={devices}
             userRole={user.role}
+            initialDeviceId={deviceFocusId}
             onAction={runAction}
             onNavigate={(target, query, deviceId) => {
               setSearch(query ?? '')

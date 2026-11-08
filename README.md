@@ -38,6 +38,8 @@ python .\simulator.py --config .\config.json run
 
 Sign in, open **Overview**, then open **Anomalies**. The page groups operational anomalies by device and then parameter, with up to 50 measurements per device page. Use the flat-list toggle to switch presentation; device, period, source, and status filters and CSV export remain available. Dataset anomalies remain in dataset analysis, not the equipment view. Simulator readings remain labelled `simulated`.
 
+**Monitoring** provides source-labelled device health, recent anomaly groups, and analysis history. Administrators manage the NASA IMS dataset schedule in **Settings**; live equipment readings are analysed as they arrive, and stopped-reporting checks run regardless of that schedule.
+
 ## Database migrations
 
 - The recovered `9e2a7c4f1b6d_add_email_delivery` migration restores the email preferences and outbox schema.

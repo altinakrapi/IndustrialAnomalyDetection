@@ -10,8 +10,8 @@ import { AlertEvaluation } from '../components/AlertEvaluation'
 import { SourceTypeBadge, SourceTypeSelect } from '../components/SourceTypeControls'
 import type { SourceTypeFilter } from '../sourceType'
 
-import type { Device, Anomaly, AnomalySummary, GroupedAnomalyDevice, Maintenance, Page, User } from '../types'
-import { groupAnomaliesByParameter, groupedAnomalyRequestError, reconcileGroupedDeviceCounts } from './anomalyGrouping'
+import type { Device, Anomaly, AnomalySummary, AnomalyTimeBucket, GroupedAnomalyDevice, Maintenance, Page, User } from '../types'
+import { formatBucketRange, groupBucketsByParameter, groupedAnomalyRequestError, reconcileGroupedDeviceCounts } from './anomalyGrouping'
 import './AnomaliesPage.css'
 
 type JsonRecord = Record<string, unknown>
@@ -22,14 +22,20 @@ function asRecord(value: unknown): JsonRecord | null {
     : null
 }
 
+function bucketCacheKey(deviceId: number, bucket: AnomalyTimeBucket, bucketMinutes: number): string {
+  return `${deviceId}:${bucket.parameter_id}:${bucket.bucket_start}:${bucketMinutes}`
+}
+
 export function AnomaliesPage({
   devices,
   userRole,
+  initialDeviceId,
   onAction,
   onNavigate,
 }: {
   devices: Device[]
   userRole: string
+  initialDeviceId?: number
   onAction: (action: () => Promise<unknown>, success: string) => Promise<void>
   onNavigate: (target: Page, query?: string, deviceId?: number) => void
 }) {
@@ -42,10 +48,16 @@ export function AnomaliesPage({
   const [groupedWarning, setGroupedWarning] = useState('')
   const [groupedViewKey, setGroupedViewKey] = useState(0)
   const [groupByDevice, setGroupByDevice] = useState(true)
-  const [devicePages, setDevicePages] = useState<Record<number, Anomaly[]>>({})
-  const [deviceOffsets, setDeviceOffsets] = useState<Record<number, number>>({})
-  const [deviceTotals, setDeviceTotals] = useState<Record<number, number>>({})
+  const [deviceBucketPages, setDeviceBucketPages] = useState<Record<number, AnomalyTimeBucket[]>>({})
+  const [deviceBucketOffsets, setDeviceBucketOffsets] = useState<Record<number, number>>({})
+  const [deviceBucketTotals, setDeviceBucketTotals] = useState<Record<number, number>>({})
+  const [deviceAnomalyTotals, setDeviceAnomalyTotals] = useState<Record<number, number>>({})
+  const [bucketMinutes, setBucketMinutes] = useState<1 | 5 | 10 | 15 | 30 | 60>(10)
+  const [bucketAnomalyPages, setBucketAnomalyPages] = useState<Record<string, Anomaly[]>>({})
+  const [bucketAnomalyOffsets, setBucketAnomalyOffsets] = useState<Record<string, number>>({})
+  const [bucketAnomalyTotals, setBucketAnomalyTotals] = useState<Record<string, number>>({})
   const [loadingDevice, setLoadingDevice] = useState<number | null>(null)
+  const [loadingBucket, setLoadingBucket] = useState<string | null>(null)
   const [total, setTotal] = useState(0)
   const [anomalyRowTotal, setAnomalyRowTotal] = useState(0)
   const [offset, setOffset] = useState(0)
@@ -55,7 +67,7 @@ export function AnomaliesPage({
   const [statusFilter, setStatusFilter] = useState('')
   const [severityFilter, setSeverityFilter] = useState('')
   const [algorithmFilter, setAlgorithmFilter] = useState('')
-  const [deviceFilter, setDeviceFilter] = useState('')
+  const [deviceFilter, setDeviceFilter] = useState(initialDeviceId ? String(initialDeviceId) : '')
   const [parameterFilter, setParameterFilter] = useState('')
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
@@ -215,9 +227,13 @@ export function AnomaliesPage({
       setGroupedTotal(response.total)
       setGroupedMeasurementTotal(response.measurement_total)
       setGroupedWarning(counts.warning || flatCountWarning)
-      setDevicePages({})
-      setDeviceOffsets({})
-      setDeviceTotals({})
+      setDeviceBucketPages({})
+      setDeviceBucketOffsets({})
+      setDeviceBucketTotals({})
+      setDeviceAnomalyTotals({})
+      setBucketAnomalyPages({})
+      setBucketAnomalyOffsets({})
+      setBucketAnomalyTotals({})
       setGroupedViewKey((current) => current + 1)
       setError('')
     } catch (caught) {
@@ -231,24 +247,59 @@ export function AnomaliesPage({
     }
   }, [makeFilterParams, sourceFilter])
 
-  const loadDevicePage = useCallback(async (deviceId: number, offset: number) => {
+  const loadDeviceBuckets = useCallback(async (deviceId: number, offset: number) => {
     setLoadingDevice(deviceId)
     try {
       const params = makeFilterParams(false)
+      params.set('bucket_minutes', String(bucketMinutes))
+      params.set('timezone', Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC')
       params.set('limit', String(pageSize))
       params.set('offset', String(offset))
-      const response = await request<{ total: number; items: Anomaly[] }>(
-        `/anomalies/devices/${deviceId}/page?${params}`,
+      const response = await request<{
+        total: number
+        anomaly_total: number
+        items: AnomalyTimeBucket[]
+      }>(
+        `/anomalies/devices/${deviceId}/buckets?${params}`,
       )
-      setDevicePages((current) => ({ ...current, [deviceId]: response.items }))
-      setDeviceOffsets((current) => ({ ...current, [deviceId]: offset }))
-      setDeviceTotals((current) => ({ ...current, [deviceId]: response.total }))
+      setDeviceBucketPages((current) => ({ ...current, [deviceId]: response.items }))
+      setDeviceBucketOffsets((current) => ({ ...current, [deviceId]: offset }))
+      setDeviceBucketTotals((current) => ({ ...current, [deviceId]: response.total }))
+      setDeviceAnomalyTotals((current) => ({ ...current, [deviceId]: response.anomaly_total }))
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Unable to load device anomalies')
+      setError(caught instanceof Error ? caught.message : 'Unable to load device anomaly buckets')
     } finally {
       setLoadingDevice(null)
     }
-  }, [makeFilterParams])
+  }, [bucketMinutes, makeFilterParams])
+
+  const loadBucketAnomalies = useCallback(async (
+    deviceId: number,
+    bucket: AnomalyTimeBucket,
+    offset: number,
+  ) => {
+    const key = bucketCacheKey(deviceId, bucket, bucketMinutes)
+    setLoadingBucket(key)
+    try {
+      const params = makeFilterParams(false)
+      params.set('parameter_id', String(bucket.parameter_id))
+      params.set('bucket_start', bucket.bucket_start)
+      params.set('bucket_minutes', String(bucketMinutes))
+      params.set('timezone', Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC')
+      params.set('limit', String(pageSize))
+      params.set('offset', String(offset))
+      const response = await request<{ total: number; items: Anomaly[] }>(
+        `/anomalies/devices/${deviceId}/bucket-anomalies?${params}`,
+      )
+      setBucketAnomalyPages((current) => ({ ...current, [key]: response.items }))
+      setBucketAnomalyOffsets((current) => ({ ...current, [key]: offset }))
+      setBucketAnomalyTotals((current) => ({ ...current, [key]: response.total }))
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to load anomalies in this time bucket')
+    } finally {
+      setLoadingBucket(null)
+    }
+  }, [bucketMinutes, makeFilterParams])
 
   const refreshList = useCallback(async () => {
     setLoading(true)
@@ -286,7 +337,7 @@ export function AnomaliesPage({
     if (!groupByDevice) return
     const frame = window.requestAnimationFrame(() => void refreshGroupedDevices())
     return () => window.cancelAnimationFrame(frame)
-  }, [groupByDevice, refreshGroupedDevices])
+  }, [bucketMinutes, groupByDevice, refreshGroupedDevices])
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => void refreshSummary())
@@ -476,9 +527,26 @@ export function AnomaliesPage({
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <span className="text-xs font-semibold text-slate-700">Anomaly presentation</span>
-        <div className="inline-flex rounded-full border border-slate-200 bg-slate-50 p-1">
-          <button className={`rounded-full px-3 py-1.5 text-xs font-semibold ${groupByDevice ? 'bg-white text-forest-700 shadow-sm' : 'text-slate-500'}`} type="button" aria-pressed={groupByDevice} onClick={() => setGroupByDevice(true)}>Group by device</button>
-          <button className={`rounded-full px-3 py-1.5 text-xs font-semibold ${!groupByDevice ? 'bg-white text-forest-700 shadow-sm' : 'text-slate-500'}`} type="button" aria-pressed={!groupByDevice} onClick={() => setGroupByDevice(false)}>Flat list</button>
+        <div className="flex flex-wrap items-center gap-3">
+          {groupByDevice && <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
+            Bucket size
+            <select
+              aria-label="Time bucket size"
+              value={bucketMinutes}
+              onChange={(event) => setBucketMinutes(Number(event.target.value) as 1 | 5 | 10 | 15 | 30 | 60)}
+            >
+              <option value={1}>1 minute</option>
+              <option value={5}>5 minutes</option>
+              <option value={10}>10 minutes</option>
+              <option value={15}>15 minutes</option>
+              <option value={30}>30 minutes</option>
+              <option value={60}>60 minutes</option>
+            </select>
+          </label>}
+          <div className="inline-flex rounded-full border border-slate-200 bg-slate-50 p-1">
+            <button className={`rounded-full px-3 py-1.5 text-xs font-semibold ${groupByDevice ? 'bg-white text-forest-700 shadow-sm' : 'text-slate-500'}`} type="button" aria-pressed={groupByDevice} onClick={() => setGroupByDevice(true)}>Group by device</button>
+            <button className={`rounded-full px-3 py-1.5 text-xs font-semibold ${!groupByDevice ? 'bg-white text-forest-700 shadow-sm' : 'text-slate-500'}`} type="button" aria-pressed={!groupByDevice} onClick={() => setGroupByDevice(false)}>Flat list</button>
+          </div>
         </div>
       </div>
       <div className="rounded-lg border border-sky-100 bg-sky-50 px-4 py-3 text-xs text-sky-900">
@@ -496,10 +564,11 @@ export function AnomaliesPage({
             <span>Device</span><span>Anomalies</span><span>Highest severity</span><span>Latest anomaly</span><span>Not reviewed</span>
           </div>
           {groupedDevices.map((device) => {
-            const deviceItems = devicePages[device.device_id] ?? []
-            const currentOffset = deviceOffsets[device.device_id] ?? 0
-            const deviceTotal = deviceTotals[device.device_id] ?? device.measurement_count
-            const parameterGroups = groupAnomaliesByParameter(deviceItems)
+            const buckets = deviceBucketPages[device.device_id] ?? []
+            const currentOffset = deviceBucketOffsets[device.device_id] ?? 0
+            const bucketTotal = deviceBucketTotals[device.device_id] ?? 0
+            const anomalyTotal = deviceAnomalyTotals[device.device_id] ?? device.anomaly_count
+            const parameterGroups = groupBucketsByParameter(buckets)
             const highestSeverity = device.highest_severity.toLowerCase()
             const severityBadgeTone = highestSeverity === 'critical' || highestSeverity === 'high'
               ? 'bg-rose-100 text-rose-800'
@@ -507,8 +576,8 @@ export function AnomaliesPage({
                 ? 'bg-amber-100 text-amber-800'
                 : 'bg-emerald-100 text-emerald-800'
             return <details className="group border-b border-slate-100 last:border-b-0" key={`${device.device_id}-${groupedFilterKey}-${groupedViewKey}`} onToggle={(event) => {
-              if (event.currentTarget.open && devicePages[device.device_id] === undefined) {
-                void loadDevicePage(device.device_id, 0)
+              if (event.currentTarget.open && deviceBucketPages[device.device_id] === undefined) {
+                void loadDeviceBuckets(device.device_id, 0)
               }
             }}>
               <summary className={`grid cursor-pointer list-none grid-cols-[minmax(12rem,2fr)_minmax(8rem,1fr)_minmax(8rem,1fr)_minmax(11rem,1.3fr)_minmax(7rem,0.8fr)] items-center gap-3 px-4 py-4 transition hover:bg-slate-50 max-md:grid-cols-2 max-md:gap-y-3 ${device.not_reviewed_count > 0 ? 'has-unreviewed' : ''}`}>
@@ -526,47 +595,91 @@ export function AnomaliesPage({
                 <span className="text-xs text-slate-700"><span className="mr-1 text-[9px] font-bold uppercase tracking-wide text-slate-400 md:hidden">Not reviewed</span>{device.not_reviewed_count > 0 ? <span className="inline-flex items-center gap-2 rounded-full border border-forest-500/60 bg-forest-700/40 px-2.5 py-1 font-semibold text-forest-100"><span className="unreviewed-dot size-2 animate-pulse rounded-full bg-forest-300" aria-hidden="true" />{device.not_reviewed_count.toLocaleString()} unreviewed</span> : <span className="text-[10px] text-forest-300">All reviewed</span>}</span>
               </summary>
               <div className="space-y-4 border-t border-slate-100 bg-slate-50/60 p-4">
-                {loadingDevice === device.device_id && <p className="text-xs text-slate-500">Loading device anomalies…</p>}
+                {loadingDevice === device.device_id && <p className="text-xs text-slate-500">Loading time buckets…</p>}
                 {parameterGroups.map((group) => {
-                  const unreviewedCount = group.anomalies.filter((anomaly) => anomaly.status === 'new' || anomaly.status === 'under_review').length
-                  return <section className="overflow-hidden rounded-lg border border-slate-200 bg-white" key={`${device.device_id}-${group.parameterId ?? 'unassigned'}`}>
-                  <h3 className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 bg-slate-50 px-4 py-2.5 text-xs font-semibold text-slate-700">
-                    <span>{group.parameterName}</span>
-                    {unreviewedCount > 0 && <span className="inline-flex items-center gap-2 rounded-full border border-forest-500/60 bg-forest-700/40 px-2.5 py-1 text-[10px] text-forest-100"><span className="unreviewed-dot size-2 animate-pulse rounded-full bg-forest-300" aria-hidden="true" />{unreviewedCount.toLocaleString()} unreviewed on this page</span>}
-                  </h3>
-                  <div className="overflow-x-auto">
-                    <table className="w-full min-w-[760px] text-left text-xs">
-                      <thead className="bg-white text-[10px] font-bold uppercase tracking-wide text-slate-500"><tr>{['Measurement time', 'Value · unit', 'Severity', 'Detectors', 'Review status', ''].map((column) => <th className="whitespace-nowrap px-4 py-3" key={column}>{column}</th>)}</tr></thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {group.anomalies.map((anomaly) => {
-                          const entry = Object.entries(anomaly.measurement_values).find(([, value]) => typeof value === 'number')
-                          const unreviewed = anomaly.status === 'new' || anomaly.status === 'under_review'
-                          const severity = (anomaly.measurement_severity ?? anomaly.computed_severity ?? anomaly.severity).toLowerCase()
-                          const anomalySeverityTone = severity === 'critical' || severity === 'high'
-                            ? 'bg-rose-100 text-rose-800'
-                            : severity === 'medium'
-                              ? 'bg-amber-100 text-amber-800'
-                              : 'bg-emerald-100 text-emerald-800'
-                          return <tr className={`hover:bg-slate-50 ${unreviewed ? 'unreviewed-row' : ''}`} key={anomaly.id}>
-                            <td className="whitespace-nowrap px-4 py-3 text-slate-600">{unreviewed && <span className="unreviewed-dot mr-2 inline-block size-2 animate-pulse rounded-full bg-forest-300 align-middle" aria-label="Unreviewed" title="Unreviewed" />}{anomaly.measurement_time ? new Date(anomaly.measurement_time).toLocaleString() : 'Time unavailable'}</td>
-                            <td className="px-4 py-3 font-mono text-slate-700">{entry ? `${entry[1]} ${anomaly.measurement_unit ?? ''}` : `— ${anomaly.measurement_unit ?? ''}`}</td>
-                            <td className="px-4 py-3"><span className={`anomaly-severity inline-flex rounded-full px-2 py-1 text-[10px] font-semibold capitalize ${anomalySeverityTone}`}>{anomaly.measurement_severity ?? anomaly.computed_severity ?? anomaly.severity}</span></td>
-                            <td className="px-4 py-3 text-slate-600">{anomaly.measurement_detectors?.join(', ') || anomaly.algorithm.replaceAll('_', ' ')}</td>
-                            <td className="px-4 py-3"><StatusBadge value={anomaly.status} /></td>
-                            <td className="px-4 py-3"><button className="whitespace-nowrap font-semibold text-forest-700 hover:text-forest-900" type="button" onClick={() => void openAnomaly(anomaly)}>Open details</button></td>
-                          </tr>
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                </section>
+                  const unreviewedCount = group.buckets.reduce((count, bucket) => count + bucket.not_reviewed_count, 0)
+                  return <section className="overflow-hidden rounded-lg border border-slate-200 bg-white" key={`${device.device_id}-${group.parameterId}`}>
+                    <h3 className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 bg-slate-50 px-4 py-2.5 text-xs font-semibold text-slate-700">
+                      <span>{group.parameterName}</span>
+                      <span className="flex flex-wrap items-center gap-2">
+                        <span className="text-[10px] text-slate-500">{group.buckets.length} buckets on this page</span>
+                        {unreviewedCount > 0 && <span className="inline-flex items-center gap-2 rounded-full border border-forest-500/60 bg-forest-700/40 px-2.5 py-1 text-[10px] text-forest-100"><span className="unreviewed-dot size-2 animate-pulse rounded-full bg-forest-300" aria-hidden="true" />{unreviewedCount.toLocaleString()} unreviewed on this page</span>}
+                      </span>
+                    </h3>
+                    <div className="divide-y divide-slate-100">
+                      {group.buckets.map((bucket) => {
+                        const key = bucketCacheKey(device.device_id, bucket, bucketMinutes)
+                        const anomalies = bucketAnomalyPages[key] ?? []
+                        const anomalyOffset = bucketAnomalyOffsets[key] ?? 0
+                        const bucketAnomalyTotal = bucketAnomalyTotals[key] ?? bucket.anomaly_count
+                        const bucketSeverity = bucket.highest_severity.toLowerCase()
+                        const bucketSeverityTone = bucketSeverity === 'critical' || bucketSeverity === 'high'
+                          ? 'bg-rose-100 text-rose-800'
+                          : bucketSeverity === 'medium'
+                            ? 'bg-amber-100 text-amber-800'
+                            : 'bg-emerald-100 text-emerald-800'
+                        return <details className="group/bucket" key={key} onToggle={(event) => {
+                          if (event.currentTarget.open && bucketAnomalyPages[key] === undefined) {
+                            void loadBucketAnomalies(device.device_id, bucket, 0)
+                          }
+                        }}>
+                          <summary className="grid cursor-pointer list-none grid-cols-[minmax(10rem,1.2fr)_minmax(7rem,0.7fr)_minmax(8rem,1fr)_minmax(8rem,1fr)_minmax(8rem,1fr)_minmax(7rem,0.8fr)] items-center gap-3 px-4 py-3 transition hover:bg-slate-50 max-lg:grid-cols-2">
+                            <span className="flex items-center gap-2 text-xs font-semibold text-slate-700">
+                              <ChevronDown size={14} className="shrink-0 text-forest-500 transition-transform group-open/bucket:rotate-180" aria-hidden="true" />
+                              {formatBucketRange(
+                                bucket.bucket_start,
+                                bucketMinutes,
+                                Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+                              )}
+                            </span>
+                            <span className="text-xs text-slate-700">{bucket.anomaly_count.toLocaleString()} anomalies</span>
+                            <span className="text-xs text-slate-700">{bucket.minimum_value ?? '—'}–{bucket.maximum_value ?? '—'} {bucket.unit ?? ''}</span>
+                            <span><span className={`anomaly-severity rounded-full px-2 py-1 text-[10px] font-semibold capitalize ${bucketSeverityTone}`}>{bucket.highest_severity}</span></span>
+                            <span className="text-xs text-slate-600">{bucket.detectors.join(', ') || '—'}</span>
+                            <span className="flex flex-wrap items-center gap-2 text-[10px] text-slate-600">
+                              {bucket.not_reviewed_count > 0 && <span className="inline-flex items-center gap-1"><span className="unreviewed-dot size-2 animate-pulse rounded-full bg-forest-300" aria-hidden="true" />{bucket.not_reviewed_count} unreviewed</span>}
+                              <StatusBadge value={bucket.review_status} />
+                            </span>
+                          </summary>
+                          <div className="space-y-3 bg-slate-50/70 px-4 py-3">
+                            {loadingBucket === key && <p className="text-xs text-slate-500">Loading anomalies in this bucket…</p>}
+                            {anomalies.map((anomaly) => {
+                              const entry = Object.entries(anomaly.measurement_values).find(([, value]) => typeof value === 'number')
+                              const unreviewed = anomaly.status === 'new' || anomaly.status === 'under_review'
+                              const severity = (anomaly.measurement_severity ?? anomaly.computed_severity ?? anomaly.severity).toLowerCase()
+                              const anomalySeverityTone = severity === 'critical' || severity === 'high'
+                                ? 'bg-rose-100 text-rose-800'
+                                : severity === 'medium'
+                                  ? 'bg-amber-100 text-amber-800'
+                                  : 'bg-emerald-100 text-emerald-800'
+                              return <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2.5" key={anomaly.id}>
+                                <div className="min-w-40 text-xs text-slate-700">{unreviewed && <span className="unreviewed-dot mr-2 inline-block size-2 animate-pulse rounded-full bg-forest-300 align-middle" aria-label="Unreviewed" title="Unreviewed" />}{anomaly.measurement_time ? new Date(anomaly.measurement_time).toLocaleString(undefined, { year: 'numeric', month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'Time unavailable'}</div>
+                                <div className="text-xs text-slate-700">{entry ? `${entry[1]} ${anomaly.measurement_unit ?? ''}` : `— ${anomaly.measurement_unit ?? ''}`}</div>
+                                <span><span className={`anomaly-severity rounded-full px-2 py-1 text-[10px] font-semibold capitalize ${anomalySeverityTone}`}>{anomaly.measurement_severity ?? anomaly.computed_severity ?? anomaly.severity}</span><span className="ml-1 text-[9px] text-slate-500">{anomaly.measurement_severity ? 'measurement severity' : 'original severity'}</span></span>
+                                <span className="text-xs text-slate-600">{anomaly.measurement_detectors?.join(', ') || anomaly.algorithm.replaceAll('_', ' ')}</span>
+                                <StatusBadge value={anomaly.status} />
+                                <button className="whitespace-nowrap text-xs font-semibold text-forest-700 hover:text-forest-900" type="button" onClick={() => void openAnomaly(anomaly)}>Open details</button>
+                              </div>
+                            })}
+                            {bucketAnomalyTotal > pageSize && <div className="flex items-center justify-between text-xs text-slate-500">
+                              <span>Showing {anomalyOffset + 1}–{Math.min(bucketAnomalyTotal, anomalyOffset + anomalies.length)} of {bucketAnomalyTotal.toLocaleString()}</span>
+                              <span className="flex gap-2">
+                                <button className="rounded-lg border border-slate-200 bg-white px-3 py-2 font-semibold disabled:opacity-40" type="button" disabled={anomalyOffset === 0 || loadingBucket === key} onClick={() => void loadBucketAnomalies(device.device_id, bucket, Math.max(0, anomalyOffset - pageSize))}>Previous</button>
+                                <button className="rounded-lg border border-slate-200 bg-white px-3 py-2 font-semibold disabled:opacity-40" type="button" disabled={anomalyOffset + anomalies.length >= bucketAnomalyTotal || loadingBucket === key} onClick={() => void loadBucketAnomalies(device.device_id, bucket, anomalyOffset + pageSize)}>Next</button>
+                              </span>
+                            </div>}
+                          </div>
+                        </details>
+                      })}
+                    </div>
+                  </section>
                 })}
-                {!deviceItems.length && loadingDevice !== device.device_id && <EmptyState icon={<Check size={20} />} title="No anomalies on this page" body="The selected filters may exclude all measurements for this device." />}
+                {!buckets.length && loadingDevice !== device.device_id && deviceBucketPages[device.device_id] !== undefined && <EmptyState icon={<Check size={20} />} title="No time buckets on this page" body="The selected filters may exclude all measurements for this device." />}
                 <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
-                  <span>{deviceTotal ? `Showing ${currentOffset + 1}–${Math.min(deviceTotal, currentOffset + deviceItems.length)} of ${deviceTotal.toLocaleString()}` : 'No results'}</span>
+                  <span>{bucketTotal ? `Showing buckets ${currentOffset + 1}–${Math.min(bucketTotal, currentOffset + buckets.length)} of ${bucketTotal.toLocaleString()} · ${anomalyTotal.toLocaleString()} anomalies total` : 'No buckets loaded'}</span>
                   <div className="flex gap-2">
-                    <button className="rounded-lg border border-slate-200 bg-white px-3 py-2 font-semibold disabled:opacity-40" type="button" disabled={currentOffset === 0 || loadingDevice === device.device_id} onClick={() => void loadDevicePage(device.device_id, Math.max(0, currentOffset - pageSize))}>Previous</button>
-                    <button className="rounded-lg border border-slate-200 bg-white px-3 py-2 font-semibold disabled:opacity-40" type="button" disabled={currentOffset + deviceItems.length >= deviceTotal || loadingDevice === device.device_id} onClick={() => void loadDevicePage(device.device_id, currentOffset + pageSize)}>Next</button>
+                    <button className="rounded-lg border border-slate-200 bg-white px-3 py-2 font-semibold disabled:opacity-40" type="button" disabled={currentOffset === 0 || loadingDevice === device.device_id} onClick={() => void loadDeviceBuckets(device.device_id, Math.max(0, currentOffset - pageSize))}>Previous</button>
+                    <button className="rounded-lg border border-slate-200 bg-white px-3 py-2 font-semibold disabled:opacity-40" type="button" disabled={currentOffset + buckets.length >= bucketTotal || loadingDevice === device.device_id} onClick={() => void loadDeviceBuckets(device.device_id, currentOffset + pageSize)}>Next</button>
                   </div>
                 </div>
               </div>
